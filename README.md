@@ -12,8 +12,8 @@ repetition and filler do not. Recent blocks stay raw.
 ## What you see
 
 Footer: `💭 -40k/120k +76k` — reasoning tokens saved, raw reasoning tokens in
-context, tokens spent by the background calls. Spinner while a rewrite runs,
-`💭 off` when disabled.
+context, tokens spent by the background calls. Spinner while a rewrite runs.
+While the mode is off the footer shows nothing.
 
 - `/compact-thinking` — report;
 - `/compact-thinking on` / `off`;

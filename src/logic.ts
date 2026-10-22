@@ -264,8 +264,9 @@ export interface StatusCounts {
 	generatedTokens: number;
 }
 
-export function formatStatusText(counts: StatusCounts, spinnerFrame = " "): string {
-	if (!counts.enabled) return "💭 off";
+/** Undefined when the mode is off: the footer shows nothing instead of a label. */
+export function formatStatusText(counts: StatusCounts, spinnerFrame = " "): string | undefined {
+	if (!counts.enabled) return undefined;
 	const separator = counts.running ? spinnerFrame : " ";
 	const saved = counts.rawThinkingTokens - counts.contextThinkingTokens;
 	const savedText = saved > 0 ? `-${formatTokens(saved)}` : "0";

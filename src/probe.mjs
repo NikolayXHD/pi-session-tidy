@@ -260,9 +260,9 @@ expectEqual("rounding up", formatTokens(13500), "14k");
 expectEqual("tens of thousands", formatTokens(150000), "150k");
 expectEqual("zero tokens", formatTokens(0), "0");
 expectEqual(
-	"the disabled mode is visible",
+	"the disabled mode leaves no status",
 	formatStatusText({ enabled: false, running: false, rawThinkingTokens: 0, contextThinkingTokens: 0, generatedTokens: 0 }),
-	"💭 off",
+	undefined,
 );
 expectEqual(
 	"the status shows savings, raw sum and generation",

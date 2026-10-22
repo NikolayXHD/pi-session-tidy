@@ -46,7 +46,7 @@ Run each scenario in an empty directory so the JSONL lands in its own place:
 
 Status. At start the footer shows `💭 -…k/…k +…k`: savings, raw reasoning sum
 and generation of the background calls. While the background call runs, a
-spinner follows the balloon; the disabled mode shows `💭 off`.
+spinner follows the balloon; while the mode is off the footer shows nothing.
 `/compact-thinking` prints a detailed report, `off`/`on` toggle. Sums are
 recomputed at every turn boundary, so in a running session with reasoning the
 second number must not stay zero.
@@ -81,8 +81,8 @@ Resume. Interrupt a session and resume it. Digests are restored from
 `compact-thinking-applied` entries and substituted into the context again; the
 status matches the number of active entries.
 
-Disable. With `/compact-thinking off` no new extension entries appear until the
-mode is enabled again.
+Disable. With `/compact-thinking off` no new extension entries appear and the
+footer shows nothing until the mode is enabled again.
 
 Dump. After several compactions `/compact-thinking dump` writes `thinking-a`
 and `thinking-b` next to the session JSONL; block headings match in both files,

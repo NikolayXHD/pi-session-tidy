@@ -579,7 +579,7 @@ class HybridThinking {
 		}
 	}
 
-	private statusText(): string {
+	private statusText(): string | undefined {
 		const frame = SPINNER_FRAMES[this.spinnerIndex] ?? " ";
 		return formatStatusText(
 			{
