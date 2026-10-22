@@ -1,15 +1,5 @@
-// Direct run of the extension rules through jiti: no Pi session.
-import { execFileSync } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
-const piEntry = realpathSync(execFileSync("which", ["pi"], { encoding: "utf8" }).trim());
-const piPackageDir = dirname(dirname(dirname(piEntry)));
-const { createJiti } = await import(pathToFileURL(join(piPackageDir, "node_modules", "jiti", "lib", "jiti.mjs")).href);
-
-const jiti = createJiti(import.meta.url);
-const {
+// Direct run of the extension rules through Node's type stripping: no Pi session.
+import {
 	parseConfig,
 	DEFAULT_CONFIG,
 	blockKey,
@@ -23,7 +13,7 @@ const {
 	validateCompaction,
 	formatTokens,
 	formatStatusText,
-} = await jiti.import(fileURLToPath(new URL("./logic.ts", import.meta.url)));
+} from "./logic.ts";
 
 let passed = 0;
 let failed = 0;

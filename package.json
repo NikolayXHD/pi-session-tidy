@@ -12,6 +12,7 @@
     "context"
   ],
   "license": "MIT",
+  "type": "module",
   "pi": {
     "extensions": [
       "./src/index.ts"
