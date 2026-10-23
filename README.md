@@ -1,22 +1,37 @@
 # pi-session-tidy
 
-Pi extension that shrinks the thinking in the context.
+Pi extension that tidies the session in two ways: it shrinks the thinking in
+the context and rewrites reports for the reader.
 
-- in some tasks reasoning takes more than half of the context;
-- the extension compresses that part by 30–60%.
+## Thinking: digests
 
-Old thinking blocks are rewritten by a background call of the same model into
-short digests: decisions, rejected options, facts and open questions survive,
-repetition and filler do not. Recent blocks stay raw.
+In some tasks reasoning takes more than half of the context; the extension
+compresses that part by 30–60%. Old thinking blocks are rewritten by a
+background call into short digests: decisions, rejected options, facts and open
+questions survive, repetition and filler do not. Recent blocks stay raw.
+
+## Reports: clear wording
+
+A report longer than `minReportTokens` is rewritten to be understood on the
+first reading: one thought per paragraph, concrete words, named actors. Every
+fact, decision and open question of the original survives — the rewrite may be
+longer, reports are not compressed. The clear wording replaces the raw report
+in the model context and in the transcript.
+
+While the rewrite is being prepared the raw report is on screen — the model
+streams it live and streaming cannot be held. When the clear wording arrives,
+the transcript switches to it.
 
 ## What you see
 
-Footer: `💭 -40k/120k +76k` — reasoning tokens saved, raw reasoning tokens in
-context, tokens spent by the background calls. Spinner while a rewrite runs.
-While the mode is off the footer shows nothing.
+Footer: `💭 -40k/120k +76k ✍ 2` — reasoning tokens saved, raw reasoning tokens
+in context, tokens spent by the background calls, reports rewritten. Spinner
+while a background call runs. While the mode is off the footer shows nothing.
 
 - `/session-tidy` — report;
 - `/session-tidy on` / `off`;
+- `/session-tidy debug on` / `off` — show the clear wording after the original
+  report instead of replacing it;
 - `/session-tidy dump` — raw and compacted blocks next to the session file.
 
 ## Observability
@@ -62,22 +77,24 @@ Settings: `~/.pi/agent/session-tidy.json`. The former
 missing settings file and a missing container are created with the default
 content and announced — nothing runs on a hidden default.
 
-| field             | default       | meaning                       |
-| ----------------- | ------------- | ----------------------------- |
-| `enabled`         | `true`        | mode is on at session start   |
-| `k`               | `5`           | recent blocks that stay raw   |
-| `minTokens`       | `512`         | shorter blocks are left alone |
-| `acceptanceRatio` | `0.95`        | a longer digest is rejected   |
-| `model`           | session model | model of the background calls |
-| `thinking`        | none          | thinking level of the calls   |
+| field             | default       | meaning                             |
+| ----------------- | ------------- | ----------------------------------- |
+| `enabled`         | `true`        | mode is on at session start         |
+| `k`               | `5`           | recent blocks that stay raw         |
+| `minTokens`       | `512`         | shorter blocks are left alone       |
+| `acceptanceRatio` | `0.95`        | a longer digest is rejected         |
+| `minReportTokens` | `200`         | shorter reports are left alone      |
+| `debug`           | `false`       | show the rewrite after the original |
+| `model`           | session model | model of the background calls       |
+| `thinking`        | none          | thinking level of the calls         |
 
 ## Containers
 
 Per-subtask settings live in `~/.pi/agent/session-tidy/`: one markdown file per
-subtask, the digests subtask uses `digests.md`. Frontmatter holds `model` and
-`thinking` — overrides of the config base — the body is the task text for the
-background model. The extension reads the files itself: pi subagents do not see
-them.
+subtask, `digests.md` for digests and `reports.md` for report rewriting.
+Frontmatter holds `model` and `thinking` — overrides of the config base — the
+body is the task text for the background model. The extension reads the files
+itself: pi subagents do not see them.
 
 ```markdown
 ---
@@ -88,29 +105,35 @@ thinking: high
 Rewrite the thinking block quoted below in the same language, shorter …
 ```
 
-Without the file the extension creates it with the built-in task text and
-says so.
+Without the file the extension creates it with the built-in task text and says
+so.
 
 ## How it works
 
-A digest is a separate call over the same session prefix: no tools, the answer
-wrapped in `<digest>…</digest>`. The call goes to the model named by `model` —
-the config base, overridden by the container; without `model` the session model
-does the work and the extension says so.
+A digest and a rewrite are separate calls over the same session prefix: no
+tools, the answer wrapped in `<digest>…</digest>` or `<rewrite>…</rewrite>`.
+The calls go to the model named by `model` — the config base, overridden by the
+container; without `model` the session model does the work and the extension
+says so. The prefix already carries earlier transformations, so later calls
+build on earlier results and the provider cache stays warm.
 
-Digests are substituted into the context by one function called in `context`
+Results are substituted into the context by one function called in `context`
 (before the main model request) and in `session_before_compact` (before Pi's
-own summarizer). Nothing is written to the session, so Pi keeps deriving the
-context size and the compaction threshold from the real provider `usage`.
+own summarizer). Nothing is written to message entries: the raw text stays in
+the session, while the state lives in extension entries
+(`session-tidy-applied`, `session-tidy-report-applied`) and survives resume. Pi
+therefore derives the context size and the compaction threshold from the real
+provider `usage`, not from a rough character estimate.
 
 The background job runs while the agent is busy with tools and right before the
 session settles; it never competes with the model stream.
 
 ## Limits
 
-- works while the extension is loaded, nothing is stored in the session;
+- works while the extension is loaded; state is restored from extension
+  entries on resume;
 - every block costs a full prefix read: a warm cache matters;
-- does not replace Pi compaction, it shrinks thinking only.
+- does not replace Pi compaction, it shrinks thinking and clarifies reports.
 
 ## Development
 

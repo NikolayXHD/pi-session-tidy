@@ -17,14 +17,15 @@ streams.
 
 The file is `~/.pi/agent/session-tidy.json` (the former
 `~/.pi/agent/compact-thinking.json` is read when the new file is missing).
-Fields: `enabled`, `k`, `minTokens`, `acceptanceRatio`, `model`, `thinking`. A
+Fields: `enabled`, `k`, `minTokens`, `acceptanceRatio`, `minReportTokens`,
+`debug`, `model`, `thinking`. A
 missing file is created with the defaults and announced; an unusable value
 falls back to its default and is reported by name.
 
-Per-subtask settings live in `~/.pi/agent/session-tidy/digests.md`: frontmatter
-`model` and `thinking` override the config, the body is the task text. A
-missing file is created with the built-in task text and announced; an empty
-task text warns and falls back to the built-in text.
+Per-subtask settings live in `~/.pi/agent/session-tidy/digests.md` and
+`reports.md`: frontmatter `model` and `thinking` override the config, the body
+is the task text. A missing file is created with the built-in task text and
+announced; an empty task text warns and falls back to the built-in text.
 
 ## Selection and replacement
 
@@ -45,6 +46,13 @@ Rules live in probe.mjs. Session consequences:
   wrapper, tool markup, grown answer) is recorded and never retried; a network
   or cancellation rejection leaves the block in the queue, but not more than
   three attempts per session.
+
+Reports are rewritten on other terms: a final answer longer than
+`minReportTokens` qualifies, a message with tool calls does not; the raw zone
+`k` does not apply to reports. The acceptance checks the form only — the
+`<rewrite>…</rewrite>` wrapper, no tool-call markup — and never the length: a
+rewrite may be longer than the original. A report whose text was changed by a
+foreign `context_edit` is left alone.
 
 ## Manual session scenarios
 
@@ -115,6 +123,16 @@ Container model. With `model: provider/id` in `digests.md` the background calls
 go to that model — a temporary logger on `before_provider_request` writes the
 model name. An unknown model name warns once and falls back to the session
 model.
+
+Report rewriting. Ask for a long final answer — a report over
+`minReportTokens`. After the run settles the session JSONL gains a
+`session-tidy-report-applied` entry, and the transcript switches from the raw
+text to the clear wording. The footer shows the counter (`✍ 1`).
+
+Debug display. With `/session-tidy debug on` the transcript keeps the raw
+report and shows the clear wording after it, below a separator; with `off` the
+text switches to the clear wording. The switch applies at render — moving the
+viewport or sending a message redraws the transcript.
 
 Loud defaults. With no settings file and no container the session start
 announces their creation, and the files on disk hold the defaults. A `k` of

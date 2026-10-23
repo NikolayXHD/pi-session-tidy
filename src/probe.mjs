@@ -8,10 +8,17 @@ import {
 	keepsSignature,
 	selectCandidates,
 	buildReplacement,
+	buildReportReplacement,
 	foreignChangedBlocks,
-	extractDigest,
+	foreignChangedText,
+	orderWork,
+	messageText,
+	normalizeText,
+	selectReports,
+	extractTagged,
 	findToolProtocolMarker,
 	validateCompaction,
+	validateReport,
 	formatTokens,
 	formatStatusText,
 } from "./logic.ts";
@@ -64,6 +71,8 @@ const fullConfig = parseConfig({
 	k: 2,
 	minTokens: 100,
 	acceptanceRatio: 0.5,
+	minReportTokens: 100,
+	debug: true,
 	model: "deepseek/deepseek-flash",
 	thinking: "high",
 });
@@ -72,6 +81,8 @@ expectEqual("config fields are read", fullConfig.config, {
 	k: 2,
 	minTokens: 100,
 	acceptanceRatio: 0.5,
+	minReportTokens: 100,
+	debug: true,
 	model: "deepseek/deepseek-flash",
 	thinking: "high",
 });
@@ -258,11 +269,11 @@ expectEqual(
 	validateCompaction(attemptResult("stop", [textBlock(`<digest>${repeatChar("x", 400)}</digest>`)]), 100, 1, estimateText).tokens,
 	100,
 );
-expectEqual("the digest is extracted from the wrapper", extractDigest("preamble <digest>\ndigest\n</digest> tail"), "digest");
-expectEqual("everything outside the tags is ignored", extractDigest("junk <digest>digest</digest> junk"), "digest");
-expectEqual("without tags there is no digest", extractDigest("plain text"), undefined);
-expectEqual("a single tag does not count", extractDigest("<digest>digest"), undefined);
-expectEqual("a closing tag before the opening one does not count", extractDigest("</digest><digest>digest"), undefined);
+expectEqual("the digest is extracted from the wrapper", extractTagged("preamble <digest>\ndigest\n</digest> tail", "digest"), "digest");
+expectEqual("everything outside the tags is ignored", extractTagged("junk <digest>digest</digest> junk", "digest"), "digest");
+expectEqual("without tags there is no digest", extractTagged("plain text", "digest"), undefined);
+expectEqual("a single tag does not count", extractTagged("<digest>digest", "digest"), undefined);
+expectEqual("a closing tag before the opening one does not count", extractTagged("</digest><digest>digest", "digest"), undefined);
 expectEqual(
 	"digest text is joined and trimmed",
 	validateCompaction(attemptResult("stop", [textBlock("  <digest> "), textBlock("first\nsecond"), textBlock(" </digest>  ")]), 1000, 0.95, estimateText).text,
@@ -303,6 +314,68 @@ expectEqual(
 	"a markup rejection is terminal",
 	validateCompaction(attemptResult("stop", [textBlock("<digest><｜｜DSML｜｜ invoke></digest>")]), 100, 0.95, estimateText).terminal,
 	true,
+);
+
+const reportText = repeatChar("r", 400);
+const reportAssistants = [
+	{ entryId: "r1", api: "anthropic-messages", content: [thinkingBlock("thought"), textBlock(reportText)] },
+	{ entryId: "r2", api: "anthropic-messages", content: [textBlock("working on it"), { type: "toolCall" }] },
+	{ entryId: "r3", api: "anthropic-messages", content: [textBlock(reportText)] },
+];
+const reportKeys = (reports) => reports.map((report) => report.entryId);
+expectEqual("reports without tool calls are selected", reportKeys(selectReports(reportAssistants, new Set(), 1, estimateText)), ["r1", "r3"]);
+expectEqual("short reports are left alone", selectReports(reportAssistants, new Set(), 1000, estimateText), []);
+expectEqual("processed reports are skipped", reportKeys(selectReports(reportAssistants, new Set(["r1"]), 1, estimateText)), ["r3"]);
+expectEqual(
+	"report text joins the text blocks",
+	selectReports([{ entryId: "r", api: "anthropic-messages", content: [textBlock(" first "), textBlock("second")] }], new Set(), 1, estimateText)[0].text,
+	"first\nsecond",
+);
+
+const mixedWork = orderWork(
+	[{ entryId: "m", api: "anthropic-messages", content: [thinkingBlock(longReasoning), textBlock(reportText)] }],
+	[{ entryId: "m", blockIndex: 0, text: longReasoning, tokens: 100 }],
+	[{ entryId: "m", text: reportText, tokens: 100 }],
+);
+expectEqual("one queue keeps session order, a digest before the report of its message", mixedWork.map((item) => item.kind), ["digest", "report"]);
+expectEqual(
+	"the queue goes by message order",
+	orderWork(reportAssistants, [{ entryId: "r3", blockIndex: 0, text: "t", tokens: 1 }], [{ entryId: "r1", text: reportText, tokens: 100 }]).map(
+		(item) => (item.kind === "digest" ? item.candidate.entryId : item.report.entryId),
+	),
+	["r1", "r3"],
+);
+
+expectEqual(
+	"the rewrite takes the place of the report text",
+	buildReportReplacement([thinkingBlock("thought"), textBlock("raw report"), textBlock("tail")], "clear report"),
+	[thinkingBlock("thought"), textBlock("clear report")],
+);
+expectEqual("a message without text keeps its blocks", buildReportReplacement([thinkingBlock("thought")], "clear report"), [thinkingBlock("thought")]);
+
+const acceptedRewrite = validateReport(attemptResult("stop", [textBlock(`<rewrite>${repeatChar("x", 800)}</rewrite>`)]), estimateText);
+expectEqual("a long rewrite is accepted", acceptedRewrite.ok, true);
+expectEqual("a rewrite of any length is accepted", validateReport(attemptResult("stop", [textBlock("<rewrite>short</rewrite>")]), estimateText).ok, true);
+expectEqual("a rewrite without the wrapper is rejected", validateReport(attemptResult("stop", [textBlock("plain answer")]), estimateText).terminal, true);
+expectEqual("an empty rewrite is rejected", validateReport(attemptResult("stop", [textBlock("<rewrite>   </rewrite>")]), estimateText).ok, false);
+expectEqual("tool markup in the rewrite is rejected", validateReport(attemptResult("stop", [textBlock("<rewrite><tool_calls></rewrite>")]), estimateText).ok, false);
+expectEqual("an aborted rewrite is not terminal", validateReport(attemptResult("aborted", []), estimateText).terminal, false);
+
+expectEqual("a foreign text edit is detected", foreignChangedText([textBlock("raw")], [textBlock("changed")]), true);
+expectEqual("unchanged text is not foreign", foreignChangedText([textBlock("raw")], [textBlock("raw")]), false);
+expectEqual("a message without text has no foreign text", foreignChangedText([thinkingBlock("thought")], [thinkingBlock("thought")]), false);
+
+expectEqual("message text joins the text blocks", messageText([thinkingBlock("thought"), textBlock(" first "), textBlock("second")]), "first\nsecond");
+expectEqual("normalization collapses whitespace", normalizeText(" a\n\n b "), "a b");
+expectEqual(
+	"the status shows the rewritten reports counter",
+	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 100, contextThinkingTokens: 100, generatedTokens: 0, rewrittenReports: 3 }),
+	"💭 0/100 +0 ✍ 3",
+);
+expectEqual(
+	"without rewrites the counter is absent",
+	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 100, contextThinkingTokens: 100, generatedTokens: 0, rewrittenReports: 0 }),
+	"💭 0/100 +0",
 );
 
 expectEqual("below a thousand tokens are printed as is", formatTokens(999), "999");

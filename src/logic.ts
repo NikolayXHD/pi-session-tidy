@@ -13,6 +13,10 @@ export interface Config {
 	minTokens: number;
 	/** A digest longer than this fraction of the source block is rejected. */
 	acceptanceRatio: number;
+	/** Reports shorter than this are left alone. */
+	minReportTokens: number;
+	/** Debug mode: the rewrite is shown after the original report. */
+	debug: boolean;
 	/** Base model of the background calls: `provider/model-id`. */
 	model?: string;
 	/** Base thinking level of the background calls. */
@@ -24,6 +28,8 @@ export const DEFAULT_CONFIG: Config = {
 	k: 5,
 	minTokens: 512,
 	acceptanceRatio: 0.95,
+	minReportTokens: 200,
+	debug: false,
 };
 
 export interface ParsedConfig {
@@ -61,6 +67,8 @@ export function parseConfig(raw: unknown): ParsedConfig {
 	const enabled = flag("enabled", source.enabled, DEFAULT_CONFIG.enabled);
 	const k = count("k", source.k, DEFAULT_CONFIG.k);
 	const minTokens = count("minTokens", source.minTokens, DEFAULT_CONFIG.minTokens);
+	const minReportTokens = count("minReportTokens", source.minReportTokens, DEFAULT_CONFIG.minReportTokens);
+	const debug = flag("debug", source.debug, DEFAULT_CONFIG.debug);
 	if (source.acceptanceRatio !== undefined) {
 		const ratio = source.acceptanceRatio;
 		if (typeof ratio === "number" && Number.isFinite(ratio) && ratio > 0 && ratio <= 1) {
@@ -72,7 +80,7 @@ export function parseConfig(raw: unknown): ParsedConfig {
 	const model = word("model", source.model);
 	const thinking = word("thinking", source.thinking);
 	return {
-		config: { enabled, k, minTokens, acceptanceRatio, model, thinking },
+		config: { enabled, k, minTokens, acceptanceRatio, minReportTokens, debug, model, thinking },
 		problems,
 	};
 }
@@ -141,6 +149,24 @@ export function isThinkingBlock(block: ContentBlock): block is ThinkingBlock {
 	return block.type === "thinking" && "thinking" in block && typeof block.thinking === "string";
 }
 
+export function isTextBlock(block: ContentBlock): block is TextBlock {
+	return block.type === "text" && "text" in block && typeof block.text === "string";
+}
+
+/** The report text of a message: its text blocks joined. */
+export function messageText(content: readonly ContentBlock[]): string {
+	return content
+		.filter(isTextBlock)
+		.map((block) => block.text.trim())
+		.filter((part) => part !== "")
+		.join("\n");
+}
+
+/** Whitespace-insensitive form: rendering may join blocks differently. */
+export function normalizeText(text: string): string {
+	return text.replace(/\s+/g, " ").trim();
+}
+
 export function keepsSignature(signature: unknown): boolean {
 	return typeof signature === "string" && REASONING_SIGNATURES.has(signature);
 }
@@ -178,6 +204,18 @@ export function foreignChangedBlocks(
 		}
 	});
 	return changed;
+}
+
+/** Whether a foreign `context_edit` changed the visible text of the message. */
+export function foreignChangedText(
+	content: readonly ContentBlock[],
+	shown: readonly ContentBlock[] | undefined,
+): boolean {
+	return content.some((block, index) => {
+		if (!isTextBlock(block)) return false;
+		const shownBlock = shown?.[index];
+		return !shownBlock || !isTextBlock(shownBlock) || shownBlock.text !== block.text;
+	});
 }
 
 export interface VisibleAssistant {
@@ -223,6 +261,62 @@ export function selectCandidates(
 	return candidates;
 }
 
+export interface ReportCandidate {
+	entryId: string;
+	text: string;
+	tokens: number;
+}
+
+/**
+ * Reports are final answers: message text without tool calls. Intermediate
+ * messages between tool calls are not rewritten. The raw zone `k` does not
+ * apply — a report is the newest thing in the session and the reason to work.
+ */
+export function selectReports(
+	assistants: readonly VisibleAssistant[],
+	skip: ReadonlySet<string>,
+	minReportTokens: number,
+	estimate: (text: string) => number,
+): ReportCandidate[] {
+	const reports: ReportCandidate[] = [];
+	for (const assistant of assistants) {
+		if (skip.has(assistant.entryId)) continue;
+		if (assistant.content.some((block) => block.type === "toolCall")) continue;
+		const text = messageText(assistant.content);
+		if (text === "") continue;
+		const tokens = estimate(text);
+		if (tokens < minReportTokens) continue;
+		reports.push({ entryId: assistant.entryId, text, tokens });
+	}
+	return reports;
+}
+
+export type WorkItem = { kind: "digest"; candidate: Candidate } | { kind: "report"; report: ReportCandidate };
+
+/** One queue: work items in session order, a digest before the report of the same message. */
+export function orderWork(
+	assistants: readonly VisibleAssistant[],
+	digests: readonly Candidate[],
+	reports: readonly ReportCandidate[],
+): WorkItem[] {
+	const digestsByEntry = new Map<string, Candidate[]>();
+	for (const candidate of digests) {
+		const group = digestsByEntry.get(candidate.entryId) ?? [];
+		group.push(candidate);
+		digestsByEntry.set(candidate.entryId, group);
+	}
+	const reportsByEntry = new Map(reports.map((report) => [report.entryId, report]));
+	const work: WorkItem[] = [];
+	for (const assistant of assistants) {
+		for (const candidate of digestsByEntry.get(assistant.entryId) ?? []) {
+			work.push({ kind: "digest", candidate });
+		}
+		const report = reportsByEntry.get(assistant.entryId);
+		if (report) work.push({ kind: "report", report });
+	}
+	return work;
+}
+
 /**
  * A one-to-one replacement: only the reasoning text of the target block
  * changes; answer text, tool calls and their signatures are untouched. A
@@ -241,6 +335,26 @@ export function buildReplacement<T extends ContentBlock>(
 		if (!keepSignature) delete replacement.thinkingSignature;
 		return replacement as unknown as T;
 	});
+}
+
+/**
+ * A rewritten report takes the place of the message text: the first text block
+ * gets it, the rest of the text goes. Thinking and tool blocks are untouched;
+ * the text signature is dropped — the text is no longer the signed one.
+ */
+export function buildReportReplacement<T extends ContentBlock>(content: readonly T[], rewrittenText: string): T[] {
+	let placed = false;
+	const next: T[] = [];
+	for (const block of content) {
+		if (!isTextBlock(block)) {
+			next.push(block);
+			continue;
+		}
+		if (placed) continue;
+		placed = true;
+		next.push({ type: "text", text: rewrittenText } as unknown as T);
+	}
+	return next;
 }
 
 export interface AttemptResult {
@@ -265,26 +379,32 @@ export function findToolProtocolMarker(text: string): string | undefined {
 	return TOOL_PROTOCOL_PATTERNS.find((pattern) => pattern.test(text))?.source;
 }
 
-const DIGEST_OPEN = /<digest>/i;
-const DIGEST_CLOSE = /<\/digest>/i;
-
 /**
- * A digest must be wrapped in `<digest>…</digest>`: the contract defines the
- * result boundary, and anything the model wrote outside the tags (preamble,
- * transcript continuation, a tool call) never enters the digest.
+ * A result must be wrapped in its tags — `<digest>` for a digest, `<rewrite>`
+ * for a rewritten report: the contract defines the result boundary, and
+ * anything the model wrote outside the tags (preamble, transcript continuation,
+ * a tool call) never enters the result.
  */
-export function extractDigest(text: string): string | undefined {
-	const open = DIGEST_OPEN.exec(text);
+export function extractTagged(text: string, tag: string): string | undefined {
+	const open = new RegExp(`<${tag}>`, "i").exec(text);
 	if (!open) return undefined;
-	const close = DIGEST_CLOSE.exec(text.slice(open.index + open[0].length));
-	if (!close) return undefined;
 	const start = open.index + open[0].length;
+	const close = new RegExp(`</${tag}>`, "i").exec(text.slice(start));
+	if (!close) return undefined;
 	return text.slice(start, start + close.index).trim();
 }
 
 export type Verdict =
 	| { ok: true; text: string; tokens: number }
 	| { ok: false; reason: string; terminal: boolean };
+
+function answerText(content: readonly ContentBlock[]): string {
+	return content
+		.filter(isTextBlock)
+		.map((block) => block.text.trim())
+		.filter((part) => part !== "")
+		.join("\n");
+}
 
 export function validateCompaction(
 	result: AttemptResult,
@@ -302,12 +422,8 @@ export function validateCompaction(
 	if (result.content.some((block) => block.type === "toolCall")) {
 		return { ok: false, reason: "the answer contains a tool call", terminal: true };
 	}
-	const text = result.content
-		.filter((block) => block.type === "text" && "text" in block && typeof block.text === "string")
-		.map((block) => (block as { text: string }).text.trim())
-		.filter((part) => part !== "")
-		.join("\n");
-	const digest = extractDigest(text);
+	const text = answerText(result.content);
+	const digest = extractTagged(text, "digest");
 	if (digest === undefined) {
 		return { ok: false, reason: "no <digest>…</digest> wrapper", terminal: true };
 	}
@@ -329,6 +445,30 @@ export function validateCompaction(
 	return { ok: true, text: digest, tokens };
 }
 
+/**
+ * A rewritten report is accepted on form: a normal stop, no tool calls, the
+ * text inside `<rewrite>…</rewrite>`. Length is no criterion — reports are not
+ * compressed.
+ */
+export function validateReport(result: AttemptResult, estimate: (text: string) => number): Verdict {
+	if (result.stopReason !== "stop") {
+		return {
+			reason: `stop reason: ${result.stopReason}`,
+			terminal: result.stopReason !== "error" && result.stopReason !== "aborted",
+			ok: false,
+		};
+	}
+	if (result.content.some((block) => block.type === "toolCall")) {
+		return { ok: false, reason: "the answer contains a tool call", terminal: true };
+	}
+	const rewritten = extractTagged(answerText(result.content), "rewrite");
+	if (rewritten === undefined) return { ok: false, reason: "no <rewrite>…</rewrite> wrapper", terminal: true };
+	if (rewritten === "") return { ok: false, reason: "empty rewrite", terminal: true };
+	const marker = findToolProtocolMarker(rewritten);
+	if (marker) return { ok: false, reason: `tool-call markup in the rewrite: ${marker}`, terminal: true };
+	return { ok: true, text: rewritten, tokens: estimate(rewritten) };
+}
+
 export function formatTokens(tokens: number): string {
 	if (tokens < 1000) return String(tokens);
 	return `${Math.round(tokens / 1000)}k`;
@@ -343,6 +483,8 @@ export interface StatusCounts {
 	contextThinkingTokens: number;
 	/** Tokens generated by the background calls. */
 	generatedTokens: number;
+	/** Reports rewritten in the current context. */
+	rewrittenReports: number;
 }
 
 /** Undefined when the mode is off: the footer shows nothing instead of a label. */
@@ -351,5 +493,6 @@ export function formatStatusText(counts: StatusCounts, spinnerFrame = " "): stri
 	const separator = counts.running ? spinnerFrame : " ";
 	const saved = counts.rawThinkingTokens - counts.contextThinkingTokens;
 	const savedText = saved > 0 ? `-${formatTokens(saved)}` : "0";
-	return `💭${separator}${savedText}/${formatTokens(counts.rawThinkingTokens)} +${formatTokens(counts.generatedTokens)}`;
+	const reports = counts.rewrittenReports > 0 ? ` ✍ ${counts.rewrittenReports}` : "";
+	return `💭${separator}${savedText}/${formatTokens(counts.rawThinkingTokens)} +${formatTokens(counts.generatedTokens)}${reports}`;
 }
