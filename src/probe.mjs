@@ -378,13 +378,47 @@ expectEqual(
 );
 expectEqual("a message without text keeps its blocks", buildTextReplacement([thinkingBlock("thought")], "clear report"), [thinkingBlock("thought")]);
 
-const acceptedRewrite = validateRewrite(attemptResult("stop", [textBlock(`<rewrite>${repeatChar("x", 800)}</rewrite>`)]), estimateText);
+const rawReply = "БЛЯДЬ ОБЪЯСНИ КОРОТКО";
+const acceptedRewrite = validateRewrite(attemptResult("stop", [textBlock(`<rewrite>${repeatChar("x", 800)}</rewrite>`)]), rawReply, estimateText);
 expectEqual("a long rewrite is accepted", acceptedRewrite.ok, true);
-expectEqual("a rewrite of any length is accepted", validateRewrite(attemptResult("stop", [textBlock("<rewrite>short</rewrite>")]), estimateText).ok, true);
-expectEqual("a rewrite without the wrapper is rejected", validateRewrite(attemptResult("stop", [textBlock("plain answer")]), estimateText).terminal, true);
-expectEqual("an empty rewrite is rejected", validateRewrite(attemptResult("stop", [textBlock("<rewrite>   </rewrite>")]), estimateText).ok, false);
-expectEqual("tool markup in the rewrite is rejected", validateRewrite(attemptResult("stop", [textBlock("<rewrite><tool_calls></rewrite>")]), estimateText).ok, false);
-expectEqual("an aborted rewrite is not terminal", validateRewrite(attemptResult("aborted", []), estimateText).terminal, false);
+expectEqual(
+	"a rewrite of any length is accepted as a replacement",
+	validateRewrite(attemptResult("stop", [textBlock("<rewrite>short</rewrite>")]), rawReply, estimateText),
+	{ ok: true, outcome: "replace", text: "short", tokens: 2 },
+);
+expectEqual(
+	"an unchanged mark is accepted without a rewrite",
+	validateRewrite(attemptResult("stop", [textBlock("<unchanged/>")]), rawReply, estimateText),
+	{ ok: true, outcome: "unchanged" },
+);
+expectEqual(
+	"an empty unchanged pair is the same mark",
+	validateRewrite(attemptResult("stop", [textBlock("<unchanged></unchanged>")]), rawReply, estimateText),
+	{ ok: true, outcome: "unchanged" },
+);
+expectEqual(
+	"a rewrite equal to the source is not a replacement",
+	validateRewrite(attemptResult("stop", [textBlock("<rewrite>  БЛЯДЬ   ОБЪЯСНИ КОРОТКО </rewrite>")]), rawReply, estimateText),
+	{ ok: true, outcome: "unchanged" },
+);
+expectEqual(
+	"both marks in one answer are rejected",
+	validateRewrite(attemptResult("stop", [textBlock("<unchanged/><rewrite>short</rewrite>")]), rawReply, estimateText),
+	{ ok: false, reason: "the answer carries both <unchanged/> and <rewrite>", terminal: true },
+);
+expectEqual(
+	"an answer without a mark is rejected",
+	validateRewrite(attemptResult("stop", [textBlock("plain answer")]), rawReply, estimateText),
+	{ ok: false, reason: "no <unchanged/> or <rewrite>…</rewrite> in the answer", terminal: true },
+);
+expectEqual(
+	"a malformed unchanged mark is rejected",
+	validateRewrite(attemptResult("stop", [textBlock("<unchanged>something</unchanged>")]), rawReply, estimateText).ok,
+	false,
+);
+expectEqual("an empty rewrite is rejected", validateRewrite(attemptResult("stop", [textBlock("<rewrite>   </rewrite>")]), rawReply, estimateText).ok, false);
+expectEqual("tool markup in the rewrite is rejected", validateRewrite(attemptResult("stop", [textBlock("<rewrite><tool_calls></rewrite>")]), rawReply, estimateText).ok, false);
+expectEqual("an aborted rewrite is not terminal", validateRewrite(attemptResult("aborted", []), rawReply, estimateText).terminal, false);
 
 expectEqual("a foreign text edit is detected", foreignChangedText([textBlock("raw")], [textBlock("changed")]), true);
 expectEqual("unchanged text is not foreign", foreignChangedText([textBlock("raw")], [textBlock("raw")]), false);

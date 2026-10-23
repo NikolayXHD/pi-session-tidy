@@ -50,10 +50,17 @@ Rules live in probe.mjs. Session consequences:
 
 Reports are rewritten on other terms: a final answer longer than
 `minReportTokens` qualifies, a message with tool calls does not; the raw zone
-`k` does not apply to reports. The acceptance checks the form only — the
-`<rewrite>…</rewrite>` wrapper, no tool-call markup — and never the length: a
-rewrite may be longer than the original. A report whose text was changed by a
-foreign `context_edit` is left alone.
+`k` does not apply to reports. The acceptance checks the form only and never
+the length: the answer carries exactly one of `<unchanged/>` and
+`<rewrite>…</rewrite>`, the rewrite is not empty and carries no tool-call
+markup; a rewrite may be longer than the original. A rewrite equal to the
+source is not a replacement — the text stays as typed. A report whose text was
+changed by a foreign `context_edit` is left alone.
+
+Replies are checked without a threshold but rewritten only when the message
+has a problem: the editor marks a calm one `<unchanged/>` and the message stays
+as typed. An answer in any other shape rewrites nothing and raises a warning
+naming the reason.
 
 ## Manual session scenarios
 
@@ -149,6 +156,16 @@ settles the session JSONL gains a `session-tidy-reply-applied` entry and the
 reply shows both texts in one message: the raw wording as typed, a divider,
 and the clear wording below it. The rewrite extracts the demand: the force
 survives as content, the noise does not.
+
+Calm reply. Send a calm short reply — "ok", a plain question. The message
+stays a single text, no divider; the session JSONL gains a
+`session-tidy-reply-applied` entry without `rewrittenText` (checked, nothing to
+rewrite) and the message is never sent to the editor again.
+
+Invalid editor answer. Break the task text temporarily ("Answer with OK.").
+The reply is not rewritten, the message stays as typed, a warning naming the
+reason appears in the session, and the session JSONL gains a
+`session-tidy-reply-rejected` entry.
 
 Loud defaults. With no settings file the session start announces its creation
 and the file on disk holds the defaults; a `k` of `-3` or a model of `7`

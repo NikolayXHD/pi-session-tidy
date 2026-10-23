@@ -116,8 +116,9 @@ interface RejectedRecord {
 interface RewriteRecord {
 	targetEntryId: string;
 	rawTokens: number;
-	rewrittenTokens: number;
-	rewrittenText: string;
+	rewrittenTokens?: number;
+	/** Omitted when the editor found nothing to rewrite: the text stays as typed. */
+	rewrittenText?: string;
 	spentTokens: number;
 	spentOutput: number;
 }
@@ -162,11 +163,12 @@ function asRejectedRecord(data: unknown): RejectedRecord | undefined {
 
 function asRewriteRecord(data: unknown): RewriteRecord | undefined {
 	if (!isRecord(data)) return undefined;
-	if (typeof data.targetEntryId !== "string" || typeof data.rewrittenText !== "string") return undefined;
+	if (typeof data.targetEntryId !== "string") return undefined;
+	if (data.rewrittenText !== undefined && typeof data.rewrittenText !== "string") return undefined;
 	return {
 		targetEntryId: data.targetEntryId,
 		rawTokens: Number(data.rawTokens ?? 0),
-		rewrittenTokens: Number(data.rewrittenTokens ?? 0),
+		rewrittenTokens: data.rewrittenTokens === undefined ? undefined : Number(data.rewrittenTokens),
 		rewrittenText: data.rewrittenText,
 		spentTokens: Number(data.spentTokens ?? 0),
 		spentOutput: Number(data.spentOutput ?? 0),
@@ -603,7 +605,15 @@ class SessionTidy {
 			group.push(record);
 			digestsByTarget.set(record.targetEntryId, group);
 		}
-		const targets = new Set<string>([...digestsByTarget.keys(), ...this.rewrites.keys()]);
+		/** Replacements only: a record without `rewrittenText` is a checked, unchanged text. */
+		const replacements = new Map<string, RewriteRecord>();
+		for (const [entryId, record] of this.rewrites) {
+			if (!inContext.has(entryId)) continue;
+			this.spentTokens += record.spentTokens;
+			this.spentOutput += record.spentOutput;
+			if (record.rewrittenText !== undefined) replacements.set(entryId, record);
+		}
+		const targets = new Set<string>([...digestsByTarget.keys(), ...replacements.keys()]);
 		for (const targetId of targets) {
 			if (!inContext.has(targetId)) continue;
 			const entry = manager.getEntry(targetId);
@@ -624,15 +634,13 @@ class SessionTidy {
 				this.spentTokens += record.spentTokens;
 				this.spentOutput += record.spentOutput;
 			}
-			const report = this.rewrites.get(targetId);
-			if (report) {
+			const replacement = replacements.get(targetId);
+			if (replacement?.rewrittenText !== undefined) {
 				const role = entry.message.role === "user" ? "user" : "assistant";
-				this.rewriteByRaw.set(`${role}:${normalizeText(messageText(entry.message.content))}`, report.rewrittenText);
-				content = buildTextReplacement(content, report.rewrittenText);
+				this.rewriteByRaw.set(`${role}:${normalizeText(messageText(entry.message.content))}`, replacement.rewrittenText);
+				content = buildTextReplacement(content, replacement.rewrittenText);
 				if (entry.message.role === "user") this.rewrittenReplies += 1;
 				else this.rewrittenReports += 1;
-				this.spentTokens += report.spentTokens;
-				this.spentOutput += report.spentOutput;
 			}
 			this.substitutions.set(entry.message.timestamp, content);
 		}
@@ -710,7 +718,9 @@ class SessionTidy {
 	/**
 	 * Rewrite a report or a reply clearer. The request repeats the session
 	 * prefix, so the editor sees the writing rules from the context. Length is no
-	 * criterion: rewritten texts are not compressed.
+	 * criterion: rewritten texts are not compressed. A text the editor leaves
+	 * unchanged is recorded and stays as typed; an invalid answer rewrites
+	 * nothing and warns in the session.
 	 */
 	private async rewriteText(item: { entryId: string; text: string; tokens: number }, kind: "report" | "reply"): Promise<void> {
 		const container = kind === "report" ? this.reportsContainer : this.repliesContainer;
@@ -726,7 +736,7 @@ class SessionTidy {
 		if (!message) return;
 		const spentTokens = message.usage?.totalTokens ?? 0;
 		const spentOutput = message.usage?.output ?? 0;
-		const verdict = validateRewrite(message, estimate);
+		const verdict = validateRewrite(message, item.text, estimate);
 		if (!verdict.ok) {
 			const reason = message.errorMessage ? `${verdict.reason}: ${message.errorMessage}` : verdict.reason;
 			if (!verdict.terminal) {
@@ -744,21 +754,22 @@ class SessionTidy {
 			this.rewriteRejected.set(item.entryId, reason);
 			this.rejectedSpentTokens += spentTokens;
 			this.rejectedSpentOutput += spentOutput;
+			this.notify(`session-tidy: ${kind} rewrite rejected — ${reason}`, "warning");
 			return;
 		}
 		this.attempts.delete(item.entryId);
 		const record: RewriteRecord = {
 			targetEntryId: item.entryId,
 			rawTokens: item.tokens,
-			rewrittenTokens: verdict.tokens,
-			rewrittenText: verdict.text,
+			rewrittenTokens: verdict.outcome === "replace" ? verdict.tokens : undefined,
+			rewrittenText: verdict.outcome === "replace" ? verdict.text : undefined,
 			spentTokens,
 			spentOutput,
 		};
 		this.persist(appliedType, record);
 		this.rewrites.set(item.entryId, record);
 		this.rebuildSubstitutions();
-		this.redrawMessages();
+		if (verdict.outcome === "replace") this.redrawMessages();
 	}
 
 	/** A digest stands in the place of the raw block: shorter, nothing lost. */

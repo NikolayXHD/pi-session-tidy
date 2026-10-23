@@ -299,8 +299,8 @@ export interface ReplyCandidate {
 
 /**
  * Replies of the human enter the queue without a threshold: a short angry
- * message is exactly the one worth rewriting, and the model returns a harmless
- * one unchanged.
+ * message is exactly the one worth rewriting. The editor answers `<unchanged/>`
+ * for a calm one and the message stays as typed.
  */
 export function selectReplies(
 	replies: readonly { entryId: string; content: readonly ContentBlock[] }[],
@@ -439,6 +439,12 @@ export type Verdict =
 	| { ok: true; text: string; tokens: number }
 	| { ok: false; reason: string; terminal: boolean };
 
+/** A rewrite either replaces the text or leaves it alone: nothing between. */
+export type RewriteVerdict =
+	| { ok: true; outcome: "replace"; text: string; tokens: number }
+	| { ok: true; outcome: "unchanged" }
+	| { ok: false; reason: string; terminal: boolean };
+
 function answerText(content: readonly ContentBlock[]): string {
 	return content
 		.filter(isTextBlock)
@@ -486,12 +492,21 @@ export function validateCompaction(
 	return { ok: true, text: digest, tokens };
 }
 
+/** `<unchanged/>` — the model found nothing to rewrite; an empty pair is the same mark. */
+const UNCHANGED_MARK = /<unchanged\s*\/>|<unchanged\s*>\s*<\/unchanged\s*>/i;
+
 /**
- * A rewritten report is accepted on form: a normal stop, no tool calls, the
- * text inside `<rewrite>…</rewrite>`. Length is no criterion — reports are not
- * compressed.
+ * The answer of a rewrite task carries exactly one of two marks: `<unchanged/>`
+ * — nothing to rewrite — or `<rewrite>…</rewrite>` — the rewritten text. Both,
+ * neither, an empty rewrite or a rewrite equal to the source is not a
+ * replacement: a rewrite that adds nothing leaves the text alone. Text outside
+ * the marks never enters the result.
  */
-export function validateRewrite(result: AttemptResult, estimate: (text: string) => number): Verdict {
+export function validateRewrite(
+	result: AttemptResult,
+	rawText: string,
+	estimate: (text: string) => number,
+): RewriteVerdict {
 	if (result.stopReason !== "stop") {
 		return {
 			reason: `stop reason: ${result.stopReason}`,
@@ -502,12 +517,22 @@ export function validateRewrite(result: AttemptResult, estimate: (text: string) 
 	if (result.content.some((block) => block.type === "toolCall")) {
 		return { ok: false, reason: "the answer contains a tool call", terminal: true };
 	}
-	const rewritten = extractTagged(answerText(result.content), "rewrite");
-	if (rewritten === undefined) return { ok: false, reason: "no <rewrite>…</rewrite> wrapper", terminal: true };
+	const text = answerText(result.content);
+	const unchanged = UNCHANGED_MARK.test(text);
+	const rewritten = extractTagged(text, "rewrite");
+	if (unchanged && rewritten !== undefined) {
+		return { ok: false, reason: "the answer carries both <unchanged/> and <rewrite>", terminal: true };
+	}
+	if (unchanged) return { ok: true, outcome: "unchanged" };
+	if (rewritten === undefined) {
+		if (/<unchanged/i.test(text)) return { ok: false, reason: "malformed <unchanged/> mark", terminal: true };
+		return { ok: false, reason: "no <unchanged/> or <rewrite>…</rewrite> in the answer", terminal: true };
+	}
 	if (rewritten === "") return { ok: false, reason: "empty rewrite", terminal: true };
 	const marker = findToolProtocolMarker(rewritten);
 	if (marker) return { ok: false, reason: `tool-call markup in the rewrite: ${marker}`, terminal: true };
-	return { ok: true, text: rewritten, tokens: estimate(rewritten) };
+	if (normalizeText(rewritten) === normalizeText(rawText)) return { ok: true, outcome: "unchanged" };
+	return { ok: true, outcome: "replace", text: rewritten, tokens: estimate(rewritten) };
 }
 
 export function formatTokens(tokens: number): string {

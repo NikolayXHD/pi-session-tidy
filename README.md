@@ -30,6 +30,12 @@ correction, a priority. The editor extracts that value and rewrites the message
 as calm, clear wording; the force survives as content, not as noise. Nothing is
 edited mechanically: extracting the value is the job of the model.
 
+Only a problematic message is rewritten. A calm, clear message is answered
+with `<unchanged/>` and stays exactly as typed — no rewrite, no second text.
+The editor answers in exactly one of two marks: `<unchanged/>` — nothing to
+rewrite — or `<rewrite>…</rewrite>` — the calm wording. An answer in any other
+shape rewrites nothing and raises a warning in the session.
+
 Both texts stay visible: the raw reply is the human message as typed, the
 clear wording is shown inside the same message, below a divider. The clear
 wording also goes to the model context — the assistant works from the value,
@@ -135,7 +141,8 @@ There is no built-in task text: a prompt is authored by the human. No prompt
 ## How it works
 
 A digest and a rewrite are separate calls over the same session prefix: no
-tools, the answer wrapped in `<digest>…</digest>` or `<rewrite>…</rewrite>`.
+tools, the answer wrapped in `<digest>…</digest>` or in one of the two rewrite
+marks — `<unchanged/>` or `<rewrite>…</rewrite>`.
 The calls go to the model named by `model` — the config base, overridden by the
 container; without `model` the session model does the work and the extension
 says so. The prefix already carries earlier transformations, so later calls
