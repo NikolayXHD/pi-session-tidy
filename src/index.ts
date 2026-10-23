@@ -465,7 +465,7 @@ class SessionTidy {
 		for (;;) {
 			const rows: { label: string; run: () => void | Promise<void> }[] = [
 				{
-					label: `режим (сессия): ${this.enabled ? "on" : "off"}`,
+					label: `mode (session): ${this.enabled ? "on" : "off"}`,
 					run: () => {
 						this.enabled = !this.enabled;
 						this.updateStatus();
@@ -473,14 +473,14 @@ class SessionTidy {
 					},
 				},
 				{
-					label: `показ докладов (сессия): ${this.debug ? "отладочный" : "обычный"}`,
+					label: `report display (session): ${this.debug ? "debug" : "plain"}`,
 					run: () => {
 						this.debug = !this.debug;
 						this.redrawMessages();
 					},
 				},
-				{ label: `модель-редактор: ${this.config.model ?? "модель сессии"}`, run: () => this.pickModel(ui) },
-				{ label: `thinking level: ${this.config.thinking ?? "нет"}`, run: () => this.pickThinking(ui) },
+				{ label: `editor model: ${this.config.model ?? "session model"}`, run: () => this.pickModel(ui) },
+				{ label: `thinking level: ${this.config.thinking ?? "none"}`, run: () => this.pickThinking(ui) },
 				{ label: `k: ${this.config.k}`, run: () => this.pickCount(ui, "k", this.config.k, (value) => (this.config = { ...this.config, k: value })) },
 				{
 					label: `minTokens: ${this.config.minTokens}`,
@@ -498,10 +498,10 @@ class SessionTidy {
 							(this.config = { ...this.config, acceptanceRatio: value }),
 						),
 				},
-				{ label: "контейнер digests.md", run: () => this.editContainer(ui, DIGESTS_CONTAINER) },
-				{ label: "контейнер reports.md", run: () => this.editContainer(ui, REPORTS_CONTAINER) },
-				{ label: "контейнер replies.md", run: () => this.editContainer(ui, REPLIES_CONTAINER) },
-				{ label: "дамп конспектов", run: () => this.dump() },
+				{ label: "container digests.md", run: () => this.editContainer(ui, DIGESTS_CONTAINER) },
+				{ label: "container reports.md", run: () => this.editContainer(ui, REPORTS_CONTAINER) },
+				{ label: "container replies.md", run: () => this.editContainer(ui, REPLIES_CONTAINER) },
+				{ label: "dump thinking", run: () => this.dump() },
 			];
 			const choice = await ui.select(`session-tidy · ${this.statusText() ?? "off"}`, rows.map((row) => row.label));
 			if (choice === undefined) return;
@@ -512,9 +512,9 @@ class SessionTidy {
 
 	private async pickModel(ui: ExtensionContext["ui"]): Promise<void> {
 		const models = this.registry?.getAvailable() ?? [];
-		const none = "модель сессии";
+		const none = "session model";
 		const choice = await ui.select(
-			"модель-редактор",
+			"editor model",
 			[none, ...models.map((model) => `${model.provider}/${model.id}`)],
 		);
 		if (choice === undefined) return;
@@ -523,10 +523,10 @@ class SessionTidy {
 	}
 
 	private async pickThinking(ui: ExtensionContext["ui"]): Promise<void> {
-		const levels = ["нет", "minimal", "low", "medium", "high", "xhigh", "max"];
-		const choice = await ui.select("thinking level модели-редактора", levels);
+		const levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+		const choice = await ui.select("editor thinking level", levels);
 		if (choice === undefined) return;
-		this.config = { ...this.config, thinking: choice === "нет" ? undefined : choice };
+		this.config = { ...this.config, thinking: choice === "none" ? undefined : choice };
 		this.persistConfig();
 	}
 
@@ -546,11 +546,11 @@ class SessionTidy {
 		apply: (value: number) => void,
 		valid: (value: number) => boolean = (value) => value > 0 && value <= 1,
 	): Promise<void> {
-		const answer = await ui.input(`${name}: число`, String(current));
+		const answer = await ui.input(name, String(current));
 		if (answer === undefined) return;
 		const value = Number(answer.trim());
 		if (!Number.isFinite(value) || !valid(value)) {
-			this.notify(`session-tidy: ${name} = ${answer} не подходит, значение сохранено`, "warning");
+			this.notify(`session-tidy: ${name} = ${answer} is not usable, the value is kept`, "warning");
 			return;
 		}
 		apply(value);
@@ -568,19 +568,7 @@ class SessionTidy {
 		if (name === DIGESTS_CONTAINER) this.digestsContainer = loaded.container;
 		else if (name === REPORTS_CONTAINER) this.reportsContainer = loaded.container;
 		else this.repliesContainer = loaded.container;
-		this.notify(`session-tidy: ${name}.md сохранён`, "info");
-	}
-
-	private async editContainer(ui: ExtensionContext["ui"], name: string): Promise<void> {
-		const path = containerPath(name);
-		const text = await ui.editor(`${name}.md`, readFileSync(path, "utf8"));
-		if (text === undefined) return;
-		writeFileSync(path, text.endsWith("\n") ? text : `${text}\n`);
-		const loaded = loadContainer(name, name === DIGESTS_CONTAINER ? DEFAULT_DIGEST_TASK : DEFAULT_REPORT_TASK);
-		if (name === DIGESTS_CONTAINER) (this as { digestsContainer: Container }).digestsContainer = loaded.container;
-		else if (name === REPORTS_CONTAINER) (this as { reportsContainer: Container }).reportsContainer = loaded.container;
-		else (this as { repliesContainer: Container }).repliesContainer = loaded.container;
-		this.notify(`session-tidy: ${name}.md сохранён`, "info");
+		this.notify(`session-tidy: ${name}.md saved`, "info");
 	}
 
 	private persistConfig(): void {

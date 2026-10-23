@@ -50,11 +50,11 @@ while a background call runs. While the mode is off the footer shows nothing.
 
 `/session-tidy` without arguments opens the menu: the title carries the state,
 row labels carry current values. Enter on a row changes the value and the menu
-stays open. The two session rows — mode and report display — change the
-running session only, so a session can flip without touching the config; every
-other row writes the config file. Model and thinking level open a picker,
-number rows open an input, container rows open the container text in the
-editor.
+stays open. The two session rows — `mode (session)` and
+`report display (session)` — change the running session only, so a session can
+flip without touching the config; every other row writes the config file. Model
+and thinking level open a picker, number rows open an input, container rows
+open the container text in the editor.
 
 ## Observability
 
