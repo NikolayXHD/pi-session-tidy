@@ -22,7 +22,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getCurrentTools, type Message, type SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { Container as TuiContainer, Text } from "@earendil-works/pi-tui";
 import {
 	convertToLlm,
 	getAgentDir,
@@ -359,7 +358,6 @@ class SessionTidy {
 		pi.on("turn_end", (_event, ctx) => this.onTurnEnd(ctx));
 		pi.on("agent_before_settle", (_event, ctx) => this.onAgentBeforeSettle(ctx));
 		pi.on("session_shutdown", () => this.stop());
-		pi.registerEntryRenderer(REPLY_ENTRY, (entry) => this.renderReply(entry.data));
 		pi.registerMarkdownTransformer((markdown, context) => this.transformMarkdown(markdown, context));
 		pi.registerCommand("session-tidy", {
 			description: "Tidy the session: menu; shortcuts: report, on, off, debug on|off, dump",
@@ -681,19 +679,6 @@ class SessionTidy {
 			this.substitutions.set(entry.message.timestamp, content);
 		}
 		this.rawThinkingTokens = this.measureRawThinking(projection);
-	}
-
-	/**
-	 * The rewritten reply stands as its own block right after the human message:
-	 * both texts stay visible — the raw one above, the clear one here.
-	 */
-	private renderReply(data: unknown) {
-		const record = asRewriteRecord(data);
-		if (!record) return undefined;
-		const block = new TuiContainer();
-		block.addChild(new Text("rewritten", 1, 0));
-		for (const line of record.rewrittenText.split("\n")) block.addChild(new Text(line, 2, 0));
-		return block;
 	}
 
 	private transformMarkdown(markdown: string, context: MarkdownTransformContext): string {
@@ -1078,13 +1063,15 @@ class SessionTidy {
 	}
 
 	/**
-	 * Rebuild assistant messages so the render transform re-runs: restoring the
-	 * default hidden-thinking label re-renders them. Without it a fresh rewrite
-	 * waits for the next rebuild — a resize or a restart.
+	 * Rebuild messages so the render transform re-runs: restoring the default
+	 * hidden-thinking label re-renders assistant messages, re-applying the theme
+	 * rebuilds the whole transcript, human messages included. Without it a fresh
+	 * rewrite waits for the next rebuild — a resize or a restart.
 	 */
 	private redrawMessages(): void {
 		try {
 			this.ui?.setHiddenThinkingLabel();
+			this.ui?.setTheme(this.ui.theme);
 		} catch {
 			// Stale UI after a session replacement.
 		}

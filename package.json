@@ -1,7 +1,7 @@
 {
   "name": "pi-session-tidy",
   "version": "1.0.0",
-  "description": "Pi extension: tidy the session — keep the last K reasoning blocks raw and replace older thinking with compact digests",
+  "description": "Pi extension: tidy the session \u2014 keep the last K reasoning blocks raw and replace older thinking with compact digests",
   "keywords": [
     "pi-package",
     "pi",
@@ -20,7 +20,6 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-ai": "*"
   }
 }
