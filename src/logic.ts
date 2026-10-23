@@ -4,6 +4,7 @@
  * The module is pure: no files, no Pi events. Everything runtime-bound lives
  * in index.ts. Test scenarios — TESTING.md, direct run — probe.mjs.
  */
+import { createHash } from "node:crypto";
 
 export interface Config {
 	/** Blocks shorter than this are not compacted. */
@@ -157,6 +158,19 @@ export function messageText(content: readonly ContentBlock[]): string {
 /** Whitespace-insensitive form: rendering may join blocks differently. */
 export function normalizeText(text: string): string {
 	return text.replace(/\s+/g, " ").trim();
+}
+
+/** Identity of the source text a transformation was made from. */
+export function textHash(text: string): string {
+	return createHash("sha256").update(normalizeText(text)).digest("hex").slice(0, 16);
+}
+
+/**
+ * Whether a record still describes its source. A record without a hash comes
+ * from a version that did not store one and is applied as before.
+ */
+export function sourceMatches(record: { rawHash?: string }, rawText: string): boolean {
+	return record.rawHash === undefined || record.rawHash === textHash(rawText);
 }
 
 export function keepsSignature(signature: unknown): boolean {

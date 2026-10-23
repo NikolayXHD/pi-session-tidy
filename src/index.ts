@@ -47,12 +47,15 @@ import {
 	formatTokens,
 	isThinkingBlock,
 	keepsSignature,
+	messageText,
 	orderWork,
 	parseConfig,
 	parseContainer,
 	selectCandidates,
 	selectReplies,
 	selectReports,
+	sourceMatches,
+	textHash,
 	validateCompaction,
 	validateRewrite,
 	type Candidate,
@@ -97,6 +100,8 @@ const REPLIES_CONTAINER = "replies";
 interface AppliedRecord {
 	targetEntryId: string;
 	blockIndex: number;
+	/** Identity of the source block text; absent in records of older versions. */
+	rawHash?: string;
 	rawTokens: number;
 	compactedTokens: number;
 	compactedText: string;
@@ -114,6 +119,8 @@ interface RejectedRecord {
 
 interface RewriteRecord {
 	targetEntryId: string;
+	/** Identity of the source text; absent in records of older versions. */
+	rawHash?: string;
 	rawTokens: number;
 	rewrittenTokens?: number;
 	/** Omitted when the editor found nothing to rewrite: the text stays as typed. */
@@ -140,6 +147,7 @@ function asAppliedRecord(data: unknown): AppliedRecord | undefined {
 	return {
 		targetEntryId: data.targetEntryId,
 		blockIndex: Number(data.blockIndex),
+		rawHash: typeof data.rawHash === "string" ? data.rawHash : undefined,
 		rawTokens: Number(data.rawTokens ?? 0),
 		compactedTokens: Number(data.compactedTokens ?? 0),
 		compactedText: data.compactedText,
@@ -166,6 +174,7 @@ function asRewriteRecord(data: unknown): RewriteRecord | undefined {
 	if (data.rewrittenText !== undefined && typeof data.rewrittenText !== "string") return undefined;
 	return {
 		targetEntryId: data.targetEntryId,
+		rawHash: typeof data.rawHash === "string" ? data.rawHash : undefined,
 		rawTokens: Number(data.rawTokens ?? 0),
 		rewrittenTokens: data.rewrittenTokens === undefined ? undefined : Number(data.rewrittenTokens),
 		rewrittenText: data.rewrittenText,
@@ -615,6 +624,7 @@ class SessionTidy {
 			for (const record of ordered) {
 				const block = content[record.blockIndex];
 				if (!block || block.type !== "thinking") continue;
+				if (!sourceMatches(record, block.thinking)) continue;
 				content = buildReplacement(
 					content,
 					record.blockIndex,
@@ -627,7 +637,7 @@ class SessionTidy {
 				this.spentOutput += record.spentOutput;
 			}
 			const replacement = replacements.get(targetId);
-			if (replacement?.rewrittenText !== undefined) {
+			if (replacement?.rewrittenText !== undefined && sourceMatches(replacement, messageText(entry.message.content))) {
 				content = buildTextReplacement(content, replacement.rewrittenText);
 				if (entry.message.role === "user") this.rewrittenReplies += 1;
 				else this.rewrittenReports += 1;
@@ -648,9 +658,17 @@ class SessionTidy {
 		theme: Parameters<EntryRenderer<RewriteRecord>>[2],
 	): ReturnType<EntryRenderer<RewriteRecord>> {
 		if (!this.enabled || data?.rewrittenText === undefined) return undefined;
+		if (!this.sourceStillStands(data)) return undefined;
 		const box = new Box(1, 0);
 		box.addChild(new Text(`${theme.fg("accent", `[${label}]`)} ${data.rewrittenText}`, 0, 0));
 		return box;
+	}
+
+	/** The rewrite is shown only while its message carries the text it was made from. */
+	private sourceStillStands(record: RewriteRecord): boolean {
+		const entry = this.manager?.getEntry(record.targetEntryId);
+		if (entry?.type !== "message") return true;
+		return sourceMatches(record, messageText(entry.message.content));
 	}
 
 	/** Substitute digests into the messages; undefined when there is nothing to change. */
@@ -757,6 +775,7 @@ class SessionTidy {
 		this.attempts.delete(item.entryId);
 		const record: RewriteRecord = {
 			targetEntryId: item.entryId,
+			rawHash: textHash(item.text),
 			rawTokens: item.tokens,
 			rewrittenTokens: verdict.outcome === "replace" ? verdict.tokens : undefined,
 			rewrittenText: verdict.outcome === "replace" ? verdict.text : undefined,
@@ -811,6 +830,7 @@ class SessionTidy {
 		const record: AppliedRecord = {
 			targetEntryId: candidate.entryId,
 			blockIndex: candidate.blockIndex,
+			rawHash: textHash(candidate.text),
 			rawTokens: candidate.tokens,
 			compactedTokens: verdict.tokens,
 			compactedText: verdict.text,

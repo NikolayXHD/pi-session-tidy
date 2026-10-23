@@ -40,6 +40,10 @@ Rules live in probe.mjs. Session consequences:
   no raw zone;
 - a block whose visible text was replaced by a foreign `context_edit` is not
   touched;
+- a record stores the identity of its source text (`rawHash`); when the source
+  text changes — a foreign `context_edit`, a branch edit — the digest or the
+  rewrite is dropped: nothing is substituted and no block is drawn. A record
+  without a hash comes from an older version and is applied as before;
 - replacement changes the text of target blocks and leaves neighbouring blocks,
   text and tool calls intact;
 - a digest is accepted only with a normal stop reason, without tool calls and

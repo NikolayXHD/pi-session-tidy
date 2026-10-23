@@ -20,6 +20,8 @@ import {
 	findToolProtocolMarker,
 	validateCompaction,
 	validateRewrite,
+	textHash,
+	sourceMatches,
 	formatTokens,
 	formatStatusText,
 } from "./logic.ts";
@@ -408,6 +410,10 @@ expectEqual("a message without text has no foreign text", foreignChangedText([th
 
 expectEqual("message text joins the text blocks", messageText([thinkingBlock("thought"), textBlock(" first "), textBlock("second")]), "first\nsecond");
 expectEqual("normalization collapses whitespace", normalizeText(" a\n\n b "), "a b");
+expectTrue("the same text in different spacing hashes alike", textHash("a  b\nc") === textHash("a b c"));
+expectTrue("a record without a hash matches its source", sourceMatches({}, "whatever"));
+expectTrue("a record matches the text it was made from", sourceMatches({ rawHash: textHash("raw") }, "raw "));
+expectEqual("a record does not match a changed source", sourceMatches({ rawHash: textHash("raw") }, "changed"), false);
 expectEqual(
 	"the status shows both rewrite counters: reports and replies",
 	formatStatusText({
