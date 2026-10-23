@@ -19,7 +19,7 @@
  * size and the compaction threshold from the real `usage`, not from a rough
  * character estimate.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getCurrentTools, type Message, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import {
@@ -531,9 +531,9 @@ class SessionTidy {
 		const key = normalizeText(markdown);
 		const rewritten = this.rewriteByRaw.get(key);
 		try {
-			writeFileSync(
+			appendFileSync(
 				"/tmp/session-tidy-transform.log",
-				`${JSON.stringify({ hit: rewritten !== undefined, key: key.slice(0, 60), keys: [...this.rewriteByRaw.keys()].map((item) => item.slice(0, 40)) })}\n`,
+				`${Date.now()} ${JSON.stringify({ hit: rewritten !== undefined, key: key.slice(0, 40) })}\n`,
 			);
 		} catch {
 			// Debug log only.
