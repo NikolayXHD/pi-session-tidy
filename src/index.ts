@@ -53,6 +53,7 @@ import {
 	parseConfig,
 	parseContainer,
 	selectCandidates,
+	selectReplies,
 	selectReports,
 	validateCompaction,
 	validateRewrite,
