@@ -19,7 +19,7 @@
  * size and the compaction threshold from the real `usage`, not from a rough
  * character estimate.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getCurrentTools, type Message, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { Container as TuiContainer, Text } from "@earendil-works/pi-tui";
@@ -420,7 +420,7 @@ class SessionTidy {
 	}
 
 	private onAgentBeforeSettle(ctx: ExtensionContext): void {
-		writeFileSync("/tmp/session-tidy-pick.log", "settle\n");
+		appendFileSync("/tmp/session-tidy-pick.log", "settle\n");
 		this.capture(ctx);
 		this.refreshThinkingTokens();
 		this.updateStatus();
@@ -599,7 +599,16 @@ class SessionTidy {
 	 */
 	/** The oldest work item: a digest or a report, in session order. */
 	private pickWork(): WorkItem | undefined {
-		writeFileSync("/tmp/session-tidy-pick.log", "pick\n");
+		appendFileSync("/tmp/session-tidy-pick.log", "pick\n");
+		try {
+			return this.pickWorkInner();
+		} catch (error) {
+			appendFileSync("/tmp/session-tidy-pick.log", `pick error ${error instanceof Error ? error.stack : String(error)}\n`);
+			throw error;
+		}
+	}
+
+	private pickWorkInner(): WorkItem | undefined {
 		const manager = this.manager;
 		if (!manager) return undefined;
 		const projection = manager.buildSessionProjection();
@@ -637,9 +646,9 @@ class SessionTidy {
 		const digests = selectCandidates(assistants, skipDigests, this.config, estimate);
 		const reports = selectReports(assistants, skipTexts, this.config.minReportTokens, estimate);
 		const replyItems = selectReplies(replies, skipTexts, estimate);
-		writeFileSync(
+		appendFileSync(
 			"/tmp/session-tidy-pick.log",
-			JSON.stringify({ slots: slots.length, assistants: assistants.length, replies: replies.map((r) => r.entryId), skip: [...skipTexts], digests: digests.length, reports: reports.length, replyItems: replyItems.map((r) => r.entryId) }),
+			`picked ${JSON.stringify({ slots: slots.length, assistants: assistants.length, replies: replies.map((r) => r.entryId), skip: [...skipTexts], digests: digests.length, reports: reports.length, replyItems: replyItems.map((r) => r.entryId) })}\n`,
 		);
 		return orderWork(slots, digests, reports, replyItems)[0];
 	}
@@ -829,7 +838,7 @@ class SessionTidy {
 
 	/** One background job: walk the candidates while there are any. */
 	private async pump(): Promise<void> {
-		writeFileSync("/tmp/session-tidy-pick.log", `pump ${this.running} ${this.enabled}\n`);
+		appendFileSync("/tmp/session-tidy-pick.log", `pump ${this.running} ${this.enabled}\n`);
 		if (this.running || !this.enabled) return;
 		const generation = this.generation;
 		this.running = true;
