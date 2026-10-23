@@ -22,15 +22,16 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getCurrentTools, type Message, type SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { Box, Text } from "@earendil-works/pi-tui";
 import {
 	convertToLlm,
 	getAgentDir,
 	type BeforeAgentStartEvent,
 	type ContextEvent,
 	type ContextEventResult,
+	type EntryRenderer,
 	type ExtensionAPI,
 	type ExtensionContext,
-	type MarkdownTransformContext,
 	type SessionBeforeCompactEvent,
 	type SessionProjection,
 	type SessionTreeEvent,
@@ -46,8 +47,6 @@ import {
 	formatTokens,
 	isThinkingBlock,
 	keepsSignature,
-	messageText,
-	normalizeText,
 	orderWork,
 	parseConfig,
 	parseContainer,
@@ -254,8 +253,6 @@ class SessionTidy {
 	private readonly rejected = new Map<string, string>();
 	private readonly rewrites = new Map<string, RewriteRecord>();
 	private readonly rewriteRejected = new Map<string, string>();
-	/** Rewritten report text by the normalized raw text: the render lookup. */
-	private readonly rewriteByRaw = new Map<string, string>();
 	private readonly attempts = new Map<string, number>();
 
 	/**
@@ -274,7 +271,6 @@ class SessionTidy {
 	private substitutions = new Map<number, AssistantContent>();
 
 	private enabled: boolean;
-	private debug: boolean;
 	private running = false;
 	private rewrittenReports = 0;
 	private rewrittenReplies = 0;
@@ -282,6 +278,7 @@ class SessionTidy {
 	private spinnerIndex = 0;
 	private spinner: ReturnType<typeof setInterval> | undefined;
 	private job: AbortController | undefined;
+	private pumpPromise: Promise<void> | undefined;
 	private generation = 0;
 	private spentTokens = 0;
 	private spentOutput = 0;
@@ -304,7 +301,6 @@ class SessionTidy {
 		this.created = loaded.created ? [loaded.created] : [];
 		/** Off until `/tidy`: the mode starts on demand, never from the config. */
 		this.enabled = false;
-		this.debug = loaded.config.debug;
 
 		pi.on("session_start", (_event, ctx) => this.onSessionStart(ctx));
 		pi.on("session_tree", (_event: SessionTreeEvent, ctx) => this.onTree(ctx));
@@ -315,7 +311,12 @@ class SessionTidy {
 		pi.on("turn_end", (_event, ctx) => this.onTurnEnd(ctx));
 		pi.on("agent_before_settle", (_event, ctx) => this.onAgentBeforeSettle(ctx));
 		pi.on("session_shutdown", () => this.stop());
-		pi.registerMarkdownTransformer((markdown, context) => this.transformMarkdown(markdown, context));
+		pi.registerEntryRenderer<RewriteRecord>(REPLY_ENTRY, (entry, _options, theme) =>
+			this.renderRewritten(entry.data, "rewritten reply", theme),
+		);
+		pi.registerEntryRenderer<RewriteRecord>(REPORT_ENTRY, (entry, _options, theme) =>
+			this.renderRewritten(entry.data, "rewritten report", theme),
+		);
 		pi.registerCommand("tidy", {
 			description: "Tidy the session: turn the mode on",
 			handler: async (_args, ctx) => this.onTidy(ctx),
@@ -331,12 +332,11 @@ class SessionTidy {
 		this.generation += 1;
 		this.systemOptions = undefined;
 		this.enabled = false;
-		this.debug = this.config.debug;
 		this.rebuild();
 		if (this.problems.length > 0) {
-			for (const problem of this.problems) this.warn(`session-tidy: ${problem}`);
+			for (const problem of this.problems) this.warn(`tidy: ${problem}`);
 		}
-		for (const path of this.created) this.inform(`session-tidy: created ${path} with the default content`);
+		for (const path of this.created) this.inform(`tidy: created ${path} with the default content`);
 		this.updateStatus();
 	}
 
@@ -352,14 +352,22 @@ class SessionTidy {
 		this.systemOptions = event.systemPromptOptions;
 	}
 
-	/** Context before the model request: digests take the place of raw blocks. */
-	private onContext(event: ContextEvent): ContextEventResult | undefined {
+	/**
+	 * Context before the model request: the queue is drained first — the request
+	 * goes out only with the final texts of everything past — and digests take
+	 * the place of raw blocks. Nothing is touched while the mode is off.
+	 */
+	private async onContext(event: ContextEvent): Promise<ContextEventResult | undefined> {
+		if (!this.enabled) return undefined;
+		await this.drain();
 		const messages = this.substituteMessages(event.messages);
 		return messages ? { messages } : undefined;
 	}
 
 	/** The same context for Pi's summarizer: the preparation is edited in place. */
-	private onBeforeCompact(event: SessionBeforeCompactEvent): void {
+	private async onBeforeCompact(event: SessionBeforeCompactEvent): Promise<void> {
+		if (!this.enabled) return;
+		await this.drain();
 		const summarized = this.substituteMessages(event.preparation.messagesToSummarize);
 		if (summarized) event.preparation.messagesToSummarize = summarized;
 		const prefix = this.substituteMessages(event.preparation.turnPrefixMessages);
@@ -370,7 +378,7 @@ class SessionTidy {
 	private onToolExecutionStart(ctx: ExtensionContext): void {
 		this.capture(ctx);
 		this.refreshThinkingTokens();
-		setTimeout(() => void this.pump(), 0);
+		this.pump();
 	}
 
 	private onTurnEnd(ctx: ExtensionContext): void {
@@ -383,7 +391,7 @@ class SessionTidy {
 		this.capture(ctx);
 		this.refreshThinkingTokens();
 		this.updateStatus();
-		setTimeout(() => void this.pump(), 0);
+		this.pump();
 	}
 
 	/** `/tidy`: the mode on for this session — the status line marks it. */
@@ -392,7 +400,7 @@ class SessionTidy {
 		this.enabled = true;
 		this.updateStatus();
 		this.notify("tidy: on", "info");
-		setTimeout(() => void this.pump(), 0);
+		this.pump();
 	}
 
 	/** `/tidy-settings`: the menu; its mode row turns the tidying off. */
@@ -415,19 +423,11 @@ class SessionTidy {
 					run: () => {
 						this.enabled = !this.enabled;
 						this.updateStatus();
-						if (this.enabled) setTimeout(() => void this.pump(), 0);
-					},
-				},
-				{
-					label: `report display (session): ${this.debug ? "debug" : "plain"}`,
-					run: () => {
-						this.debug = !this.debug;
-						this.redrawMessages();
+						if (this.enabled) this.pump();
 					},
 				},
 				{ label: `editor model: ${this.config.model ?? "session model"}`, run: () => this.pickModel(ui) },
 				{ label: `thinking level: ${this.config.thinking ?? "none"}`, run: () => this.pickThinking(ui) },
-				{ label: `k: ${this.config.k}`, run: () => this.pickCount(ui, "k", this.config.k, (value) => (this.config = { ...this.config, k: value })) },
 				{
 					label: `minTokens: ${this.config.minTokens}`,
 					run: () => this.pickCount(ui, "minTokens", this.config.minTokens, (value) => (this.config = { ...this.config, minTokens: value })),
@@ -497,7 +497,7 @@ class SessionTidy {
 		if (answer === undefined) return;
 		const value = Number(answer.trim());
 		if (!Number.isFinite(value) || !valid(value)) {
-			this.notify(`session-tidy: ${name} = ${answer} is not usable, the value is kept`, "warning");
+			this.notify(`tidy: ${name} = ${answer} is not usable, the value is kept`, "warning");
 			return;
 		}
 		apply(value);
@@ -519,7 +519,7 @@ class SessionTidy {
 		if (name === DIGESTS_CONTAINER) this.digestsContainer = loaded.container;
 		else if (name === REPORTS_CONTAINER) this.reportsContainer = loaded.container;
 		else this.repliesContainer = loaded.container;
-		this.notify(`session-tidy: ${name}.md saved`, "info");
+		this.notify(`tidy: ${name}.md saved`, "info");
 	}
 
 	private persistConfig(): void {
@@ -581,7 +581,6 @@ class SessionTidy {
 	private rebuildSubstitutions(): void {
 		const manager = this.manager;
 		this.substitutions = new Map();
-		this.rewriteByRaw.clear();
 		this.savedThinkingTokens = 0;
 		this.rewrittenReports = 0;
 		this.rewrittenReplies = 0;
@@ -629,8 +628,6 @@ class SessionTidy {
 			}
 			const replacement = replacements.get(targetId);
 			if (replacement?.rewrittenText !== undefined) {
-				const role = entry.message.role === "user" ? "user" : "assistant";
-				this.rewriteByRaw.set(`${role}:${normalizeText(messageText(entry.message.content))}`, replacement.rewrittenText);
 				content = buildTextReplacement(content, replacement.rewrittenText);
 				if (entry.message.role === "user") this.rewrittenReplies += 1;
 				else this.rewrittenReports += 1;
@@ -640,13 +637,20 @@ class SessionTidy {
 		this.rawThinkingTokens = this.measureRawThinking(projection);
 	}
 
-	private transformMarkdown(markdown: string, context: MarkdownTransformContext): string {
-		if (context.messageType === "assistant-thinking") return markdown;
-		const role = context.messageType === "user" ? "user" : "assistant";
-		const rewritten = this.rewriteByRaw.get(`${role}:${normalizeText(markdown)}`);
-		if (rewritten === undefined) return markdown;
-		if (context.messageType === "user" || this.debug) return `${markdown}\n\n---\n\n${rewritten}`;
-		return rewritten;
+	/**
+	 * The rewritten text is drawn where its record sits in the session: the
+	 * entry position is the attribution, never the text — two identical messages
+	 * carry two rewrites. Nothing is shown while the mode is off.
+	 */
+	private renderRewritten(
+		data: RewriteRecord | undefined,
+		label: string,
+		theme: Parameters<EntryRenderer<RewriteRecord>>[2],
+	): ReturnType<EntryRenderer<RewriteRecord>> {
+		if (!this.enabled || data?.rewrittenText === undefined) return undefined;
+		const box = new Box(1, 0);
+		box.addChild(new Text(`${theme.fg("accent", `[${label}]`)} ${data.rewrittenText}`, 0, 0));
+		return box;
 	}
 
 	/** Substitute digests into the messages; undefined when there is nothing to change. */
@@ -702,7 +706,7 @@ class SessionTidy {
 		}
 		const skipDigests = new Set<string>([...this.appliedRecords.keys(), ...this.rejected.keys(), ...changed]);
 		const skipTexts = new Set<string>([...this.rewrites.keys(), ...this.rewriteRejected.keys(), ...textChanged]);
-		const digests = this.digestsContainer ? selectCandidates(assistants, skipDigests, this.config, estimate) : [];
+		const digests = this.digestsContainer ? selectCandidates(assistants, skipDigests, this.config.minTokens, estimate) : [];
 		const reports = this.reportsContainer ? selectReports(assistants, skipTexts, this.config.minReportTokens, estimate) : [];
 		const replyItems = this.repliesContainer ? selectReplies(replies, skipTexts, estimate) : [];
 		return orderWork(slots, digests, reports, replyItems)[0];
@@ -747,7 +751,7 @@ class SessionTidy {
 			this.rewriteRejected.set(item.entryId, reason);
 			this.rejectedSpentTokens += spentTokens;
 			this.rejectedSpentOutput += spentOutput;
-			this.notify(`session-tidy: ${kind} rewrite rejected — ${reason}`, "warning");
+			this.notify(`tidy: ${kind} rewrite rejected — ${reason}`, "warning");
 			return;
 		}
 		this.attempts.delete(item.entryId);
@@ -762,7 +766,6 @@ class SessionTidy {
 		this.persist(appliedType, record);
 		this.rewrites.set(item.entryId, record);
 		this.rebuildSubstitutions();
-		if (verdict.outcome === "replace") this.redrawMessages();
 	}
 
 	/** A digest stands in the place of the raw block: shorter, nothing lost. */
@@ -878,26 +881,50 @@ class SessionTidy {
 	 */
 	private editorModel(spec: string | undefined) {
 		if (!spec) {
-			this.warn("session-tidy: model is not set, the background calls go to the session model");
+			this.warn("tidy: model is not set, the background calls go to the session model");
 			return this.model;
 		}
 		const registry = this.registry;
 		if (!registry) return this.model;
 		const separator = spec.indexOf("/");
 		if (separator <= 0) {
-			this.warn(`session-tidy: "${spec}" is not provider/model-id`);
+			this.warn(`tidy: "${spec}" is not provider/model-id`);
 			return this.model;
 		}
 		const found = registry.find(spec.slice(0, separator), spec.slice(separator + 1));
 		if (!found) {
-			this.warn(`session-tidy: model "${spec}" is not found`);
+			this.warn(`tidy: model "${spec}" is not found`);
 			return this.model;
 		}
 		return found;
 	}
 
-	/** One background job: walk the candidates while there are any. */
-	private async pump(): Promise<void> {
+	/** Start the background job: the tool window, the settle, the mode on. */
+	private pump(): void {
+		if (this.running || !this.enabled) return;
+		this.pumpPromise = this.runQueue();
+	}
+
+	/**
+	 * The serialized drain: the queue runs to the empty end before a request goes
+	 * out — all or nothing, like compaction (@NikolayXHD). No request sees a text
+	 * that changes after the fact.
+	 */
+	private async drain(): Promise<void> {
+		for (;;) {
+			const running = this.pumpPromise;
+			if (running) {
+				this.pumpPromise = undefined;
+				await running;
+				continue;
+			}
+			if (!this.enabled || !this.pickWork()) return;
+			this.pumpPromise = this.runQueue();
+		}
+	}
+
+	/** One background job: walk the queue while there is work. */
+	private async runQueue(): Promise<void> {
 		if (this.running || !this.enabled) return;
 		const generation = this.generation;
 		this.running = true;
@@ -914,7 +941,7 @@ class SessionTidy {
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.warn(`session-tidy: ${message}`);
+			this.warn(`tidy: ${message}`);
 		} finally {
 			this.running = false;
 			this.stopSpinner();
@@ -946,7 +973,7 @@ class SessionTidy {
 		if (!manager) return;
 		const sessionFile = manager.getSessionFile();
 		if (!sessionFile) {
-			this.notify("session-tidy: the session is not persisted, nowhere to write", "warning");
+			this.notify("tidy: the session is not persisted, nowhere to write", "warning");
 			return;
 		}
 		const raw: string[] = [];
@@ -968,7 +995,7 @@ class SessionTidy {
 		const dir = dirname(sessionFile);
 		writeFileSync(join(dir, "thinking-a"), `${raw.join("\n\n")}\n`);
 		writeFileSync(join(dir, "thinking-b"), `${substituted.join("\n\n")}\n`);
-		this.notify(`session-tidy: ${raw.length} digests in ${dir}`, "info");
+		this.notify(`tidy: ${raw.length} digests in ${dir}`, "info");
 	}
 
 	private persist(customType: string, data: unknown): void {
@@ -1025,21 +1052,6 @@ class SessionTidy {
 		const manager = this.manager;
 		if (!manager) return;
 		this.rawThinkingTokens = this.measureRawThinking(manager.buildSessionProjection());
-	}
-
-	/**
-	 * Rebuild messages so the render transform re-runs: restoring the default
-	 * hidden-thinking label re-renders assistant messages, re-applying the theme
-	 * rebuilds the whole transcript, human messages included. Without it a fresh
-	 * rewrite waits for the next rebuild — a resize or a restart.
-	 */
-	private redrawMessages(): void {
-		try {
-			this.ui?.setHiddenThinkingLabel();
-			this.ui?.setTheme(this.ui.theme);
-		} catch {
-			// Stale UI after a session replacement.
-		}
 	}
 
 	private updateStatus(): void {

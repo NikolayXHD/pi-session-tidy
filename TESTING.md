@@ -11,17 +11,19 @@ Everything that lives only in the session is checked manually through a child
 
 The background job starts in the tool window (`tool_execution_start`) and
 before settling (`agent_before_settle`); it never runs while the main model
-streams.
+streams. Turns are serialized: before every model request — `context` and
+`session_before_compact` — the queue is drained to the empty end, so no
+request sees a text that changes after the fact.
 
 ## Config
 
 The file is `~/.pi/agent/session-tidy.json` (the former
 `~/.pi/agent/compact-thinking.json` is read when the new file is missing).
-Fields: `k`, `minTokens`, `acceptanceRatio`, `minReportTokens`, `debug`,
-`model`, `thinking`. The mode is not a config field: tidy stays off until
-`/tidy`, and a leftover `enabled` field is reported by name. A
-missing file is created with the defaults and announced; an unusable value
-falls back to its default and is reported by name.
+Fields: `minTokens`, `acceptanceRatio`, `minReportTokens`, `model`, `thinking`.
+The mode is not a config field: tidy stays off until `/tidy`. Removed fields
+left in an old config — `enabled`, `k`, `debug` — are reported by name, never
+silently ignored. A missing file is created with the defaults and announced;
+an unusable value falls back to its default and is reported by name.
 
 Per-subtask settings live in `~/.pi/agent/session-tidy/digests.md`,
 `reports.md` and `replies.md`: frontmatter `model` and `thinking` override the
@@ -34,8 +36,8 @@ container row as `— no task, subtask off`.
 Rules live in probe.mjs. Session consequences:
 
 - blocks shorter than `minTokens` are left alone;
-- `k` counts all thinking blocks, including redacted ones, so the raw zone
-  keeps the width of that many actions;
+- every thinking block is a candidate as soon as its message is done: there is
+  no raw zone;
 - a block whose visible text was replaced by a foreign `context_edit` is not
   touched;
 - replacement changes the text of target blocks and leaves neighbouring blocks,
@@ -50,8 +52,8 @@ Rules live in probe.mjs. Session consequences:
   three attempts per session.
 
 Reports are checked on other terms: a final answer longer than
-`minReportTokens` qualifies, a message with tool calls does not; the raw zone
-`k` does not apply to reports. Only a report that has a problem is rewritten;
+`minReportTokens` qualifies, a message with tool calls does not. Only a report
+that has a problem is rewritten;
 a clear one is marked `<unchanged/>` and stays as typed. The acceptance checks
 the form only and never the length: the answer carries exactly one of
 `<unchanged/>` and `<rewrite>…</rewrite>`, the rewrite is not empty and carries
@@ -82,12 +84,12 @@ second number must not stay zero.
 
 Settings menu. `/tidy-settings` opens the menu with the state in the title and
 current values in the rows. Enter on a row changes the value and the menu
-stays open. The `mode (session)` and `report display (session)`
-rows change the running session only; the model, thinking level and number rows
-write the config file — after changing `k` the file holds the new value.
-Container rows open the text in the editor and save it on close.
+stays open. The `mode (session)` row changes the running session only and is
+the off switch; the model, thinking level and number rows write the config
+file — after changing `minTokens` the file holds the new value. Container rows
+open the text in the editor and save it on close.
 
-Compaction during a task. With `k = 0` and `minTokens` around 16 ask the agent
+Compaction during a task. With `minTokens` around 16 ask the agent
 to run several bash commands in a row. After the second answer the session
 JSONL contains `session-tidy-applied` entries; the extension writes no
 `context_edit` entries at all; the assistant message entry keeps the full raw
@@ -148,24 +150,27 @@ model.
 
 Report rewriting. Ask for a long final answer with a problem — jargon or
 tangled categories. After the run settles the session JSONL gains a
-`session-tidy-report-applied` entry and the transcript switches from the raw
-text to the clear wording. The footer counter shows `✍ 1`.
+`session-tidy-report-applied` entry and a `rewritten report` block with the
+clear wording appears right below the raw report. The footer counter shows
+`✍ 1`.
 
 Clear report. Ask for a long final answer that is already well-formed. The
 transcript keeps it as typed, the session JSONL gains a
 `session-tidy-report-applied` entry without `rewrittenText`, and the counters
 stay at zero.
 
-Debug display. With `report display (session): debug` the transcript keeps the
-raw report and shows the clear wording after it, below a separator; with
-`plain` the text switches to the clear wording. The switch applies at render —
-moving the viewport or sending a message redraws the transcript.
-
 Reply rewriting. Send a reply with caps lock and profanity. After the run
-settles the session JSONL gains a `session-tidy-reply-applied` entry and the
-reply shows both texts in one message: the raw wording as typed, a divider,
-and the clear wording below it. The rewrite extracts the demand: the force
-survives as content, the noise does not. The footer counter shows `😞 1`.
+settles the session JSONL gains a `session-tidy-reply-applied` entry and a
+`rewritten reply` block with the clear wording appears right below the reply;
+the raw wording stays the human message as typed. The rewrite extracts the
+demand: the force survives as content, the noise does not. The footer counter
+shows `😞 1`.
+
+Attribution by position. Send the same short reply several times ("да" to
+several questions). Each rewrite block sits under its own message with its own
+text: identical messages never share a rewrite. Turn tidy off — the blocks
+disappear and no substitution reaches the model; the entries stay in the
+JSONL.
 
 Calm reply. Send a calm short reply — "ok", a plain question. The message
 stays a single text, no divider; the session JSONL gains a

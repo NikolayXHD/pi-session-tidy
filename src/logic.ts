@@ -6,16 +6,12 @@
  */
 
 export interface Config {
-	/** How many last actions keep raw thinking blocks. */
-	k: number;
 	/** Blocks shorter than this are not compacted. */
 	minTokens: number;
 	/** A digest longer than this fraction of the source block is rejected. */
 	acceptanceRatio: number;
 	/** Reports shorter than this are left alone. */
 	minReportTokens: number;
-	/** Debug mode: the rewrite is shown after the original report. */
-	debug: boolean;
 	/** Base model of the background calls: `provider/model-id`. */
 	model?: string;
 	/** Base thinking level of the background calls. */
@@ -23,11 +19,9 @@ export interface Config {
 }
 
 export const DEFAULT_CONFIG: Config = {
-	k: 5,
 	minTokens: 512,
 	acceptanceRatio: 0.95,
 	minReportTokens: 200,
-	debug: false,
 };
 
 export interface ParsedConfig {
@@ -49,12 +43,6 @@ export function parseConfig(raw: unknown): ParsedConfig {
 		unusable(name, value, "a non-negative number is expected, the default is used");
 		return orDefault;
 	};
-	const flag = (name: string, value: unknown, orDefault: boolean): boolean => {
-		if (value === undefined) return orDefault;
-		if (typeof value === "boolean") return value;
-		unusable(name, value, "a boolean is expected, the default is used");
-		return orDefault;
-	};
 	const word = (name: string, value: unknown): string | undefined => {
 		if (value === undefined) return undefined;
 		if (typeof value === "string" && value.trim() !== "") return value.trim();
@@ -62,13 +50,17 @@ export function parseConfig(raw: unknown): ParsedConfig {
 		return undefined;
 	};
 	let acceptanceRatio = DEFAULT_CONFIG.acceptanceRatio;
-	const k = count("k", source.k, DEFAULT_CONFIG.k);
 	if (source.enabled !== undefined) {
 		problems.push("enabled is no longer a config field: the mode starts on demand with /tidy");
 	}
+	if (source.k !== undefined) {
+		problems.push("k is no longer a config field: the raw zone is gone, every block is processed on arrival");
+	}
+	if (source.debug !== undefined) {
+		problems.push("debug is no longer a config field: the rewritten text is always shown next to its message");
+	}
 	const minTokens = count("minTokens", source.minTokens, DEFAULT_CONFIG.minTokens);
 	const minReportTokens = count("minReportTokens", source.minReportTokens, DEFAULT_CONFIG.minReportTokens);
-	const debug = flag("debug", source.debug, DEFAULT_CONFIG.debug);
 	if (source.acceptanceRatio !== undefined) {
 		const ratio = source.acceptanceRatio;
 		if (typeof ratio === "number" && Number.isFinite(ratio) && ratio > 0 && ratio <= 1) {
@@ -80,7 +72,7 @@ export function parseConfig(raw: unknown): ParsedConfig {
 	const model = word("model", source.model);
 	const thinking = word("thinking", source.thinking);
 	return {
-		config: { k, minTokens, acceptanceRatio, minReportTokens, debug, model, thinking },
+		config: { minTokens, acceptanceRatio, minReportTokens, model, thinking },
 		problems,
 	};
 }
@@ -232,31 +224,26 @@ export interface Candidate {
 }
 
 /**
- * Candidates are thinking blocks left of the cut point: the last K blocks stay
- * raw, everything older is compacted. Returned in order of appearance.
+ * Every thinking block is a candidate as soon as its message is done: no raw
+ * zone, no cut point. Returned in order of appearance.
  */
 export function selectCandidates(
 	assistants: readonly VisibleAssistant[],
 	skip: ReadonlySet<string>,
-	config: Pick<Config, "k" | "minTokens">,
+	minTokens: number,
 	estimate: (text: string) => number,
 ): Candidate[] {
-	const blocks: { entryId: string; blockIndex: number; block: ThinkingBlock; api: string }[] = [];
+	const candidates: Candidate[] = [];
 	for (const assistant of assistants) {
 		assistant.content.forEach((block, blockIndex) => {
 			if (!isThinkingBlock(block)) return;
-			blocks.push({ entryId: assistant.entryId, blockIndex, block, api: assistant.api });
+			if (skip.has(blockKey(assistant.entryId, blockIndex))) return;
+			if (!canReplay(block, assistant.api)) return;
+			const text = block.thinking.trim();
+			const tokens = estimate(text);
+			if (tokens < minTokens) return;
+			candidates.push({ entryId: assistant.entryId, blockIndex, text, tokens });
 		});
-	}
-	const cutoff = Math.max(0, blocks.length - config.k);
-	const candidates: Candidate[] = [];
-	for (const item of blocks.slice(0, cutoff)) {
-		if (skip.has(blockKey(item.entryId, item.blockIndex))) continue;
-		if (!canReplay(item.block, item.api)) continue;
-		const text = item.block.thinking.trim();
-		const tokens = estimate(text);
-		if (tokens < config.minTokens) continue;
-		candidates.push({ entryId: item.entryId, blockIndex: item.blockIndex, text, tokens });
 	}
 	return candidates;
 }

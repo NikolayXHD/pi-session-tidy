@@ -63,41 +63,36 @@ const thinkingBlock = (text, extra = {}) => ({ type: "thinking", thinking: text,
 const textBlock = (value) => ({ type: "text", text: value });
 const repeatChar = (char, count) => char.repeat(count);
 const candidateKeys = (candidates) => candidates.map((candidate) => blockKey(candidate.entryId, candidate.blockIndex));
-const windowConfig = (k, minTokens) => ({ k, minTokens });
 const attemptResult = (stopReason, content) => ({ stopReason, content });
 
 expectEqual("empty config gives defaults", parseConfig(undefined), { config: DEFAULT_CONFIG, problems: [] });
 const fullConfig = parseConfig({
-	k: 2,
 	minTokens: 100,
 	acceptanceRatio: 0.5,
 	minReportTokens: 100,
-	debug: true,
 	model: "deepseek/deepseek-flash",
 	thinking: "high",
 });
 expectEqual("config fields are read", fullConfig.config, {
-	k: 2,
 	minTokens: 100,
 	acceptanceRatio: 0.5,
 	minReportTokens: 100,
-	debug: true,
 	model: "deepseek/deepseek-flash",
 	thinking: "high",
 });
 expectEqual("usable values leave no problems", fullConfig.problems, []);
-const brokenConfig = parseConfig({ k: -3, minTokens: "x", acceptanceRatio: 2 });
+const brokenConfig = parseConfig({ minTokens: "x", acceptanceRatio: 2 });
 expectEqual("broken fields fall back to defaults", brokenConfig.config, DEFAULT_CONFIG);
 expectEqual("broken fields are reported by name", brokenConfig.problems, [
-	"k is -3: a non-negative number is expected, the default is used",
 	'minTokens is "x": a non-negative number is expected, the default is used',
 	"acceptanceRatio is 2: a number in (0, 1] is expected, the default is used",
 ]);
-expectEqual("fractional k rounds down", parseConfig({ k: 2.9 }).config.k, 2);
-const obsoleteEnabled = parseConfig({ enabled: true });
-expectEqual("the removed enabled field leaves the defaults", obsoleteEnabled.config, DEFAULT_CONFIG);
-expectEqual("the removed enabled field is reported by name", obsoleteEnabled.problems, [
+const obsoleteFields = parseConfig({ enabled: true, k: 2.9, debug: false });
+expectEqual("removed fields leave the defaults", obsoleteFields.config, DEFAULT_CONFIG);
+expectEqual("removed fields are reported by name", obsoleteFields.problems, [
 	"enabled is no longer a config field: the mode starts on demand with /tidy",
+	"k is no longer a config field: the raw zone is gone, every block is processed on arrival",
+	"debug is no longer a config field: the rewritten text is always shown next to its message",
 ]);
 expectEqual("acceptance ratio zero is not accepted", parseConfig({ acceptanceRatio: 0 }).config.acceptanceRatio, DEFAULT_CONFIG.acceptanceRatio);
 expectEqual("acceptance ratio one is allowed", parseConfig({ acceptanceRatio: 1 }).config.acceptanceRatio, 1);
@@ -167,29 +162,23 @@ const assistants = [
 ];
 
 expectEqual(
-	"k keeps the last blocks raw",
-	candidateKeys(selectCandidates(assistants, new Set(), windowConfig(2, 1), estimateText)),
-	["e1:0", "e2:0"],
+	"every thinking block is a candidate in session order, the newest too",
+	candidateKeys(selectCandidates(assistants, new Set(), 1, estimateText)),
+	["e1:0", "e2:0", "e2:2", "e3:0"],
 );
-expectEqual("k covers the whole history: no candidates", candidateKeys(selectCandidates(assistants, new Set(), windowConfig(4, 1), estimateText)), []);
-expectEqual("compacted blocks are skipped", candidateKeys(selectCandidates(assistants, new Set(["e1:0"]), windowConfig(2, 1), estimateText)), ["e2:0"]);
-expectEqual("short blocks are skipped", candidateKeys(selectCandidates(assistants, new Set(), windowConfig(2, 200), estimateText)), []);
-expectEqual(
-	"candidates go from oldest to newest",
-	candidateKeys(selectCandidates(assistants, new Set(), windowConfig(1, 1), estimateText)),
-	["e1:0", "e2:0", "e2:2"],
-);
+expectEqual("compacted blocks are skipped", candidateKeys(selectCandidates(assistants, new Set(["e1:0"]), 1, estimateText)), ["e2:0", "e2:2", "e3:0"]);
+expectEqual("short blocks are skipped", candidateKeys(selectCandidates(assistants, new Set(), 200, estimateText)), []);
 expectEqual(
 	"block text is trimmed",
-	selectCandidates([{ entryId: "e", api: "anthropic-messages", content: [thinkingBlock(`  ${longReasoning}  `)] }], new Set(), windowConfig(0, 1), estimateText)[0].text,
+	selectCandidates([{ entryId: "e", api: "anthropic-messages", content: [thinkingBlock(`  ${longReasoning}  `)] }], new Set(), 1, estimateText)[0].text,
 	longReasoning,
 );
 expectEqual(
-	"a redacted block in the raw zone does not shift selection",
+	"a redacted block is not a candidate",
 	candidateKeys(selectCandidates([
 		{ entryId: "e1", api: "anthropic-messages", content: [thinkingBlock(longReasoning)] },
 		{ entryId: "e2", api: "anthropic-messages", content: [thinkingBlock(longReasoning, { redacted: true })] },
-	], new Set(), windowConfig(1, 1), estimateText)),
+	], new Set(), 1, estimateText)),
 	["e1:0"],
 );
 expectEqual(
@@ -197,15 +186,10 @@ expectEqual(
 	candidateKeys(selectCandidates([
 		{ entryId: "e1", api: "openai-completions", content: [thinkingBlock(longReasoning, { thinkingSignature: "sig" })] },
 		{ entryId: "e2", api: "openai-completions", content: [thinkingBlock(longReasoning, { thinkingSignature: "reasoning_content" })] },
-	], new Set(), windowConfig(0, 1), estimateText)),
+	], new Set(), 1, estimateText)),
 	["e2:0"],
 );
-expectEqual("empty history: no candidates", candidateKeys(selectCandidates([], new Set(), windowConfig(0, 1), estimateText)), []);
-expectEqual(
-	"k = 0 compacts every block",
-	candidateKeys(selectCandidates(assistants, new Set(), windowConfig(0, 1), estimateText)),
-	["e1:0", "e2:0", "e2:2", "e3:0"],
-);
+expectEqual("empty history: no candidates", candidateKeys(selectCandidates([], new Set(), 1, estimateText)), []);
 
 const signatureBlock = thinkingBlock("old text", { thinkingSignature: "reasoning_content", redacted: false });
 const responseBlock = textBlock("answer");

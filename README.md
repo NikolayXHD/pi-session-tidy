@@ -7,9 +7,10 @@ clear wording.
 ## Thinking: digests
 
 In some tasks reasoning takes more than half of the context; the extension
-compresses that part by 30–60%. Old thinking blocks are rewritten by a
-background call into short digests: decisions, rejected options, facts and open
-questions survive, repetition and filler do not. Recent blocks stay raw.
+compresses that part by 30–60%. Every thinking block is rewritten by a
+background call into a short digest as soon as its message is done: decisions,
+rejected options, facts and open questions survive, repetition and filler do
+not. There is no raw zone.
 
 ## Reports: clear wording
 
@@ -18,12 +19,13 @@ has a problem — hard to understand on the first reading. A clear report is
 answered with `<unchanged/>` and stays as typed: every rewrite must be worth
 its place. The rewrite takes one thought per paragraph, concrete words, named
 actors. Every fact, decision and open question of the original survives — the
-rewrite may be longer, reports are not compressed. The clear wording replaces
-the raw report in the model context and in the transcript.
+rewrite may be longer, reports are not compressed. The clear wording goes to
+the model context in place of the raw report.
 
-While the rewrite is being prepared the raw report is on screen — the model
-streams it live and streaming cannot be held. When the clear wording arrives,
-the transcript switches to it.
+Both texts stay in the transcript: the raw report as streamed, the clear
+wording in a `rewritten report` block right below it. The block is bound to
+its message by session position — the entry that stores the rewrite — never
+by the text: two identical reports carry two rewrites.
 
 ## Replies: value out of the heat
 
@@ -39,9 +41,10 @@ rewrite — or `<rewrite>…</rewrite>` — the calm wording. An answer in any o
 shape rewrites nothing and raises a warning in the session.
 
 Both texts stay visible: the raw reply is the human message as typed, the
-clear wording is shown inside the same message, below a divider. The clear
-wording also goes to the model context — the assistant works from the value,
-not from the noise.
+clear wording is shown in a `rewritten reply` block right below it — bound to
+its message by session position, never by the text. The clear wording also
+goes to the model context — the assistant works from the value, not from the
+noise.
 
 ## What you see
 
@@ -52,7 +55,7 @@ problem are rewritten, so both counters count writing problems: reports show
 how the session model writes, replies — the human's outbursts (@NikolayXHD:
 «счётчик моей печали»), a quality signal of the model too. A counter appears
 after its first rewrite. Spinner while a background call runs. While the mode
-is off the footer shows nothing.
+is off the footer is empty and nothing is rewritten, substituted or shown.
 
 - `/tidy` — turn the tidying on for this session; the status line appears;
 - `/tidy-settings` — the settings menu; its `mode (session)` row turns the
@@ -62,11 +65,10 @@ is off the footer shows nothing.
 
 `/tidy-settings` opens the menu: the title carries the state, row labels carry
 current values. Enter on a row changes the value and the menu stays open. The
-two session rows — `mode (session)` and `report display (session)` — change the
-running session only, so a session can flip without touching the config; every
-other row writes the config file. Model and thinking level open a picker,
-number rows open an input, container rows open the container text in the
-editor. `counters report` prints digests, rewrites and spending; `dump
+`mode (session)` row changes the running session only — it is the off switch;
+every other row writes the config file. Model and thinking level open a
+picker, number rows open an input, container rows open the container text in
+the editor. `counters report` prints digests, rewrites and spending; `dump
 thinking` writes the thinking files.
 
 ## Observability
@@ -113,15 +115,17 @@ missing settings file and a missing container are created with the default
 content and announced — nothing runs on a hidden default. The mode is not a
 config field: tidy stays off until `/tidy` turns it on.
 
-| field             | default       | meaning                             |
-| ----------------- | ------------- | ----------------------------------- |
-| `k`               | `5`           | recent blocks that stay raw         |
-| `minTokens`       | `512`         | shorter blocks are left alone       |
-| `acceptanceRatio` | `0.95`        | a longer digest is rejected         |
-| `minReportTokens` | `200`         | shorter reports are left alone      |
-| `debug`           | `false`       | show the rewrite after the original |
-| `model`           | session model | model of the background calls       |
-| `thinking`        | none          | thinking level of the calls         |
+| field             | default       | meaning                        |
+| ----------------- | ------------- | ------------------------------ |
+| `minTokens`       | `512`         | shorter blocks are left alone  |
+| `acceptanceRatio` | `0.95`        | a longer digest is rejected    |
+| `minReportTokens` | `200`         | shorter reports are left alone |
+| `model`           | session model | model of the background calls  |
+| `thinking`        | none          | thinking level of the calls    |
+
+The mode is not a config field: tidy stays off until `/tidy` turns it on.
+Removed fields left in an old config — `enabled`, `k`, `debug` — are reported
+by name, never silently ignored.
 
 ## Containers
 
@@ -161,8 +165,17 @@ the session, while the state lives in extension entries
 (`session-tidy-applied`, `session-tidy-report-applied`,
 `session-tidy-reply-applied`) and survives resume.
 
-The background job runs while the agent is busy with tools and right before the
-session settles; it never competes with the model stream.
+Turns are serialized: before every model request the queue is drained to the
+empty end — the request goes out only with the final texts of everything past,
+all or nothing, like compaction. A text never changes after the turn it
+appeared in. The background job also starts in the tool window and before the
+session settles, so the drain at the request is normally already done; it
+never competes with the model stream.
+
+The rewritten texts are drawn by entry renderers at the position of their
+entries — the position is the attribution. Markdown transformers are not used
+for this: a transformer cannot tell one message from another, and a text-keyed
+lookup gives ten identical replies one shared rewrite.
 
 ## Limits
 
