@@ -1,7 +1,8 @@
 # pi-session-tidy
 
-Pi extension that tidies the session in two ways: it shrinks the thinking in
-the context and rewrites reports for the reader.
+Pi extension that tidies the session in three ways: it shrinks the thinking in
+the context, rewrites reports for the reader, and turns emotional replies into
+clear wording.
 
 ## Thinking: digests
 
@@ -21,6 +22,17 @@ in the model context and in the transcript.
 While the rewrite is being prepared the raw report is on screen — the model
 streams it live and streaming cannot be held. When the clear wording arrives,
 the transcript switches to it.
+
+## Replies: value out of the heat
+
+A reply of the human — caps lock, profanity, fragments — carries a demand, a
+correction, a priority. The editor extracts that value and rewrites the message
+as calm, clear wording; the force survives as content, not as noise. Nothing is
+edited mechanically: extracting the value is the job of the model.
+
+Both texts stay visible: the raw reply is the human message as typed, the
+rewritten one is a block right after it. The clear wording also goes to the
+model context — the assistant works from the value, not from the noise.
 
 ## What you see
 
@@ -91,7 +103,8 @@ content and announced — nothing runs on a hidden default.
 ## Containers
 
 Per-subtask settings live in `~/.pi/agent/session-tidy/`: one markdown file per
-subtask, `digests.md` for digests and `reports.md` for report rewriting.
+subtask, `digests.md` for digests, `reports.md` for report rewriting and
+`replies.md` for replies.
 Frontmatter holds `model` and `thinking` — overrides of the config base — the
 body is the task text for the background model. The extension reads the files
 itself: pi subagents do not see them.
@@ -121,9 +134,8 @@ Results are substituted into the context by one function called in `context`
 (before the main model request) and in `session_before_compact` (before Pi's
 own summarizer). Nothing is written to message entries: the raw text stays in
 the session, while the state lives in extension entries
-(`session-tidy-applied`, `session-tidy-report-applied`) and survives resume. Pi
-therefore derives the context size and the compaction threshold from the real
-provider `usage`, not from a rough character estimate.
+(`session-tidy-applied`, `session-tidy-report-applied`,
+`session-tidy-reply-applied`) and survives resume.
 
 The background job runs while the agent is busy with tools and right before the
 session settles; it never competes with the model stream.
