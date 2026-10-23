@@ -19,7 +19,7 @@
  * size and the compaction threshold from the real `usage`, not from a rough
  * character estimate.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getCurrentTools, type Message, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import {
@@ -137,17 +137,20 @@ function configPath(): string {
 	return join(getAgentDir(), "session-tidy.json");
 }
 
-function loadConfig(): { config: Config; problem?: string } {
+function loadConfig(): { config: Config; problems: string[]; created?: string } {
 	for (const path of [configPath(), legacyConfigPath()]) {
 		try {
-			return { config: parseConfig(JSON.parse(readFileSync(path, "utf8"))) };
+			const parsed = parseConfig(JSON.parse(readFileSync(path, "utf8")));
+			return { config: parsed.config, problems: parsed.problems.map((problem) => `${path}: ${problem}`) };
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
 			const message = error instanceof Error ? error.message : String(error);
-			return { config: DEFAULT_CONFIG, problem: `${path}: ${message}` };
+			return { config: DEFAULT_CONFIG, problems: [`${path}: ${message}`] };
 		}
 	}
-	return { config: DEFAULT_CONFIG };
+	const path = configPath();
+	writeDefaultFile(path, `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`);
+	return { config: DEFAULT_CONFIG, problems: [], created: path };
 }
 
 /** Config of the former extension name: read so old setups keep working. */
@@ -159,21 +162,30 @@ function containerPath(name: string): string {
 	return join(getAgentDir(), CONTAINER_DIR, `${name}.md`);
 }
 
-/** A missing container falls back to the built-in task text without a warning. */
-function loadContainer(name: string, fallbackTask: string): { container: Container; problem?: string } {
+/** A missing file is created with the default content: nothing runs in secret. */
+function writeDefaultFile(path: string, content: string): void {
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, content);
+}
+
+function loadContainer(name: string, fallbackTask: string): { container: Container; problems: string[]; created?: string } {
 	const path = containerPath(name);
 	try {
 		const container = parseContainer(readFileSync(path, "utf8"));
 		if (container.task === "") {
-			return { container: { ...container, task: fallbackTask }, problem: `${path}: empty task text, built-in text used` };
+			return {
+				container: { ...container, task: fallbackTask },
+				problems: [`${path}: the task text is empty, the built-in text is used`],
+			};
 		}
-		return { container };
+		return { container, problems: [] };
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-			return { container: { task: fallbackTask } };
+			writeDefaultFile(path, `${fallbackTask.trim()}\n`);
+			return { container: { task: fallbackTask }, problems: [], created: path };
 		}
 		const message = error instanceof Error ? error.message : String(error);
-		return { container: { task: fallbackTask }, problem: `${path}: ${message}` };
+		return { container: { task: fallbackTask }, problems: [`${path}: ${message}`] };
 	}
 }
 
@@ -188,8 +200,9 @@ class SessionTidy {
 	private readonly pi: ExtensionAPI;
 	private readonly config: Config;
 	private readonly problems: string[];
+	private readonly created: string[];
 	private readonly digestsContainer: Container;
-	private readonly warned = new Set<string>();
+	private readonly announced = new Set<string>();
 	private readonly appliedRecords = new Map<string, AppliedRecord>();
 	private readonly rejected = new Map<string, string>();
 	private readonly attempts = new Map<string, number>();
@@ -228,9 +241,8 @@ class SessionTidy {
 		this.config = loaded.config;
 		const digests = loadContainer(DIGESTS_CONTAINER, DEFAULT_DIGEST_TASK);
 		this.digestsContainer = digests.container;
-		this.problems = [];
-		if (loaded.problem) this.problems.push(loaded.problem);
-		if (digests.problem) this.problems.push(digests.problem);
+		this.problems = [...loaded.problems, ...digests.problems];
+		this.created = [loaded.created, digests.created].filter((path): path is string => path !== undefined);
 		this.enabled = loaded.config.enabled;
 
 		pi.on("session_start", (_event, ctx) => this.onSessionStart(ctx));
@@ -257,6 +269,7 @@ class SessionTidy {
 		if (this.problems.length > 0) {
 			for (const problem of this.problems) this.warn(`session-tidy: ${problem}`);
 		}
+		for (const path of this.created) this.inform(`session-tidy: created ${path} with the default content`);
 		this.updateStatus();
 	}
 
@@ -547,8 +560,12 @@ class SessionTidy {
 	 * the session model. The setting names the model as `provider/model-id`.
 	 */
 	private editorModel(spec: string | undefined) {
+		if (!spec) {
+			this.warn("session-tidy: model is not set, the background calls go to the session model");
+			return this.model;
+		}
 		const registry = this.registry;
-		if (!spec || !registry) return this.model;
+		if (!registry) return this.model;
 		const separator = spec.indexOf("/");
 		if (separator <= 0) {
 			this.warn(`session-tidy: "${spec}" is not provider/model-id`);
@@ -705,9 +722,17 @@ class SessionTidy {
 	}
 
 	private warn(message: string): void {
-		if (this.warned.has(message)) return;
-		this.warned.add(message);
-		this.notify(message, "warning");
+		this.announce(message, "warning");
+	}
+
+	private inform(message: string): void {
+		this.announce(message, "info");
+	}
+
+	private announce(message: string, level: "info" | "warning"): void {
+		if (this.announced.has(message)) return;
+		this.announced.add(message);
+		this.notify(message, level);
 	}
 
 	private stop(): void {

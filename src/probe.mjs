@@ -58,26 +58,50 @@ const candidateKeys = (candidates) => candidates.map((candidate) => blockKey(can
 const windowConfig = (k, minTokens) => ({ k, minTokens });
 const attemptResult = (stopReason, content) => ({ stopReason, content });
 
-expectEqual("empty config gives defaults", parseConfig(undefined), DEFAULT_CONFIG);
-expectEqual(
-	"config fields are read",
-	parseConfig({ enabled: false, k: 2, minTokens: 100, acceptanceRatio: 0.5 }),
-	{ enabled: false, k: 2, minTokens: 100, acceptanceRatio: 0.5 },
-);
-expectEqual(
-	"broken fields fall back to defaults",
-	parseConfig({ k: -3, minTokens: "x", acceptanceRatio: 2 }),
-	{ ...DEFAULT_CONFIG, k: 0 },
-);
-expectEqual("fractional k rounds down", parseConfig({ k: 2.9 }).k, 2);
-expectEqual("a string instead of enabled does not disable the mode", parseConfig({ enabled: "false" }).enabled, true);
-expectEqual("acceptance ratio zero is not accepted", parseConfig({ acceptanceRatio: 0 }).acceptanceRatio, DEFAULT_CONFIG.acceptanceRatio);
-expectEqual("acceptance ratio one is allowed", parseConfig({ acceptanceRatio: 1 }).acceptanceRatio, 1);
+expectEqual("empty config gives defaults", parseConfig(undefined), { config: DEFAULT_CONFIG, problems: [] });
+const fullConfig = parseConfig({
+	enabled: false,
+	k: 2,
+	minTokens: 100,
+	acceptanceRatio: 0.5,
+	model: "deepseek/deepseek-flash",
+	thinking: "high",
+});
+expectEqual("config fields are read", fullConfig.config, {
+	enabled: false,
+	k: 2,
+	minTokens: 100,
+	acceptanceRatio: 0.5,
+	model: "deepseek/deepseek-flash",
+	thinking: "high",
+});
+expectEqual("usable values leave no problems", fullConfig.problems, []);
+const brokenConfig = parseConfig({ k: -3, minTokens: "x", acceptanceRatio: 2 });
+expectEqual("broken fields fall back to defaults", brokenConfig.config, DEFAULT_CONFIG);
+expectEqual("broken fields are reported by name", brokenConfig.problems, [
+	"k is -3: a non-negative number is expected, the default is used",
+	'minTokens is "x": a non-negative number is expected, the default is used',
+	"acceptanceRatio is 2: a number in (0, 1] is expected, the default is used",
+]);
+expectEqual("fractional k rounds down", parseConfig({ k: 2.9 }).config.k, 2);
+const stringEnabled = parseConfig({ enabled: "false" });
+expectEqual("a string instead of enabled does not disable the mode", stringEnabled.config.enabled, true);
+expectEqual("a string instead of enabled is reported", stringEnabled.problems, [
+	'enabled is "false": a boolean is expected, the default is used',
+]);
+expectEqual("acceptance ratio zero is not accepted", parseConfig({ acceptanceRatio: 0 }).config.acceptanceRatio, DEFAULT_CONFIG.acceptanceRatio);
+expectEqual("acceptance ratio one is allowed", parseConfig({ acceptanceRatio: 1 }).config.acceptanceRatio, 1);
 const configWithEditor = parseConfig({ model: "deepseek/deepseek-flash", thinking: "high" });
-expectEqual("the editor model is read from the config", configWithEditor.model, "deepseek/deepseek-flash");
-expectEqual("the editor thinking level is read from the config", configWithEditor.thinking, "high");
-expectEqual("an empty model is ignored", parseConfig({ model: "   " }).model, undefined);
-expectEqual("a non-string model is ignored", parseConfig({ model: 7 }).model, undefined);
+expectEqual("the editor model is read from the config", configWithEditor.config.model, "deepseek/deepseek-flash");
+expectEqual("the editor thinking level is read from the config", configWithEditor.config.thinking, "high");
+const emptyModel = parseConfig({ model: "   " });
+expectEqual("an empty model is ignored", emptyModel.config.model, undefined);
+expectEqual("an empty model is reported", emptyModel.problems, [
+	'model is "   ": a non-empty string is expected, the setting is ignored',
+]);
+const nonStringModel = parseConfig({ model: 7 });
+expectEqual("a non-string model is ignored", nonStringModel.config.model, undefined);
+expectEqual("a non-string model is reported", nonStringModel.problems.length, 1);
 
 const containerText = ["---", "model: deepseek/deepseek-flash", "thinking: high", "---", "", "Rewrite the block."].join("\n");
 expectEqual("the container keeps model, thinking and task", parseContainer(containerText), {

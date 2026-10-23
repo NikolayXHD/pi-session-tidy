@@ -18,13 +18,13 @@ streams.
 The file is `~/.pi/agent/session-tidy.json` (the former
 `~/.pi/agent/compact-thinking.json` is read when the new file is missing).
 Fields: `enabled`, `k`, `minTokens`, `acceptanceRatio`, `model`, `thinking`. A
-missing file equals the defaults; a broken field falls back to its default, and
-the extension warns once per session.
+missing file is created with the defaults and announced; an unusable value
+falls back to its default and is reported by name.
 
 Per-subtask settings live in `~/.pi/agent/session-tidy/digests.md`: frontmatter
-`model` and `thinking` override the config, the body is the task text. Without
-the file the built-in task text is used; a file with an empty task warns and
-falls back to the built-in text.
+`model` and `thinking` override the config, the body is the task text. A
+missing file is created with the built-in task text and announced; an empty
+task text warns and falls back to the built-in text.
 
 ## Selection and replacement
 
@@ -109,3 +109,7 @@ Container model. With `model: provider/id` in `digests.md` the background calls
 go to that model — a temporary logger on `before_provider_request` writes the
 model name. An unknown model name warns once and falls back to the session
 model.
+
+Loud defaults. With no settings file and no container the session start
+announces their creation, and the files on disk hold the defaults. A `k` of
+`-3` or a model of `7` warns by name and falls back to the default.

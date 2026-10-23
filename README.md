@@ -58,7 +58,9 @@ pi install git:github.com/NikolayXHD/pi-session-tidy
 ```
 
 Settings: `~/.pi/agent/session-tidy.json`. The former
-`~/.pi/agent/compact-thinking.json` is read when the new file is missing.
+`~/.pi/agent/compact-thinking.json` is read when the new file is missing. A
+missing settings file and a missing container are created with the default
+content and announced — nothing runs on a hidden default.
 
 | field             | default       | meaning                       |
 | ----------------- | ------------- | ----------------------------- |
@@ -86,14 +88,15 @@ thinking: high
 Rewrite the thinking block quoted below in the same language, shorter …
 ```
 
-Without the file the built-in task text is used.
+Without the file the extension creates it with the built-in task text and
+says so.
 
 ## How it works
 
 A digest is a separate call over the same session prefix: no tools, the answer
 wrapped in `<digest>…</digest>`. The call goes to the model named by `model` —
-the config base, overridden by the container; without `model` it is the session
-model, and then the provider reads the request from the warm cache.
+the config base, overridden by the container; without `model` the session model
+does the work and the extension says so.
 
 Digests are substituted into the context by one function called in `context`
 (before the main model request) and in `session_before_compact` (before Pi's

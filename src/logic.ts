@@ -26,20 +26,54 @@ export const DEFAULT_CONFIG: Config = {
 	acceptanceRatio: 0.95,
 };
 
-export function parseConfig(raw: unknown): Config {
+export interface ParsedConfig {
+	config: Config;
+	/** Values that fell back to defaults, one line per value. */
+	problems: string[];
+}
+
+/** Unusable values fall back to defaults and are reported by name. */
+export function parseConfig(raw: unknown): ParsedConfig {
 	const source = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
-	const number = (value: unknown, fallback: number): number =>
-		typeof value === "number" && Number.isFinite(value) ? value : fallback;
-	const ratio = number(source.acceptanceRatio, DEFAULT_CONFIG.acceptanceRatio);
-	const text = (value: unknown): string | undefined =>
-		typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+	const problems: string[] = [];
+	const unusable = (name: string, value: unknown, reason: string): void => {
+		problems.push(`${name} is ${JSON.stringify(value) ?? String(value)}: ${reason}`);
+	};
+	const count = (name: string, value: unknown, orDefault: number): number => {
+		if (value === undefined) return orDefault;
+		if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.floor(value);
+		unusable(name, value, "a non-negative number is expected, the default is used");
+		return orDefault;
+	};
+	const flag = (name: string, value: unknown, orDefault: boolean): boolean => {
+		if (value === undefined) return orDefault;
+		if (typeof value === "boolean") return value;
+		unusable(name, value, "a boolean is expected, the default is used");
+		return orDefault;
+	};
+	const word = (name: string, value: unknown): string | undefined => {
+		if (value === undefined) return undefined;
+		if (typeof value === "string" && value.trim() !== "") return value.trim();
+		unusable(name, value, "a non-empty string is expected, the setting is ignored");
+		return undefined;
+	};
+	let acceptanceRatio = DEFAULT_CONFIG.acceptanceRatio;
+	const enabled = flag("enabled", source.enabled, DEFAULT_CONFIG.enabled);
+	const k = count("k", source.k, DEFAULT_CONFIG.k);
+	const minTokens = count("minTokens", source.minTokens, DEFAULT_CONFIG.minTokens);
+	if (source.acceptanceRatio !== undefined) {
+		const ratio = source.acceptanceRatio;
+		if (typeof ratio === "number" && Number.isFinite(ratio) && ratio > 0 && ratio <= 1) {
+			acceptanceRatio = ratio;
+		} else {
+			unusable("acceptanceRatio", ratio, "a number in (0, 1] is expected, the default is used");
+		}
+	}
+	const model = word("model", source.model);
+	const thinking = word("thinking", source.thinking);
 	return {
-		enabled: typeof source.enabled === "boolean" ? source.enabled : DEFAULT_CONFIG.enabled,
-		k: Math.max(0, Math.floor(number(source.k, DEFAULT_CONFIG.k))),
-		minTokens: Math.max(0, Math.floor(number(source.minTokens, DEFAULT_CONFIG.minTokens))),
-		acceptanceRatio: ratio > 0 && ratio <= 1 ? ratio : DEFAULT_CONFIG.acceptanceRatio,
-		model: text(source.model),
-		thinking: text(source.thinking),
+		config: { enabled, k, minTokens, acceptanceRatio, model, thinking },
+		problems,
 	};
 }
 
