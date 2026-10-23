@@ -31,8 +31,9 @@ as calm, clear wording; the force survives as content, not as noise. Nothing is
 edited mechanically: extracting the value is the job of the model.
 
 Both texts stay visible: the raw reply is the human message as typed, the
-rewritten one is a block right after it. The clear wording also goes to the
-model context — the assistant works from the value, not from the noise.
+clear wording is shown inside the same message, below a divider. The clear
+wording also goes to the model context — the assistant works from the value,
+not from the noise.
 
 ## What you see
 
