@@ -302,7 +302,8 @@ class SessionTidy {
 		this.repliesContainer = replies.container;
 		this.problems = [...loaded.problems, ...digests.problems, ...reports.problems, ...replies.problems];
 		this.created = loaded.created ? [loaded.created] : [];
-		this.enabled = loaded.config.enabled;
+		/** Off until `/tidy`: the mode starts on demand, never from the config. */
+		this.enabled = false;
 		this.debug = loaded.config.debug;
 
 		pi.on("session_start", (_event, ctx) => this.onSessionStart(ctx));
@@ -315,9 +316,13 @@ class SessionTidy {
 		pi.on("agent_before_settle", (_event, ctx) => this.onAgentBeforeSettle(ctx));
 		pi.on("session_shutdown", () => this.stop());
 		pi.registerMarkdownTransformer((markdown, context) => this.transformMarkdown(markdown, context));
-		pi.registerCommand("session-tidy", {
-			description: "Tidy the session: menu; shortcuts: report, on, off, debug on|off, dump",
-			handler: async (args, ctx) => this.onCommand(args, ctx),
+		pi.registerCommand("tidy", {
+			description: "Tidy the session: turn the mode on",
+			handler: async (_args, ctx) => this.onTidy(ctx),
+		});
+		pi.registerCommand("tidy-settings", {
+			description: "Tidy the session: settings menu",
+			handler: async (_args, ctx) => this.onSettings(ctx),
 		});
 	}
 
@@ -325,7 +330,7 @@ class SessionTidy {
 		this.capture(ctx);
 		this.generation += 1;
 		this.systemOptions = undefined;
-		this.enabled = this.config.enabled;
+		this.enabled = false;
 		this.debug = this.config.debug;
 		this.rebuild();
 		if (this.problems.length > 0) {
@@ -381,32 +386,19 @@ class SessionTidy {
 		setTimeout(() => void this.pump(), 0);
 	}
 
-	private async onCommand(args: string, ctx: ExtensionContext): Promise<void> {
+	/** `/tidy`: the mode on for this session — the status line marks it. */
+	private onTidy(ctx: ExtensionContext): void {
 		this.capture(ctx);
-		const command = args.trim().toLowerCase();
-		if (command === "") {
-			await this.openMenu(ctx);
-			return;
-		}
-		if (command === "on" || command === "off") {
-			this.enabled = command === "on";
-			this.updateStatus();
-			this.notify(`session-tidy: ${this.enabled ? "on" : "off"}`, "info");
-			if (this.enabled) setTimeout(() => void this.pump(), 0);
-			return;
-		}
-		if (command === "debug" || command === "debug on" || command === "debug off") {
-			this.debug = command === "debug" ? !this.debug : command === "debug on";
-			this.redrawMessages();
-			this.notify(`session-tidy: debug ${this.debug ? "on" : "off"}`, "info");
-			return;
-		}
-		if (command === "dump") {
-			this.dump();
-			return;
-		}
+		this.enabled = true;
 		this.updateStatus();
-		this.notify(this.reportText(), "info");
+		this.notify("tidy: on", "info");
+		setTimeout(() => void this.pump(), 0);
+	}
+
+	/** `/tidy-settings`: the menu; its mode row turns the tidying off. */
+	private async onSettings(ctx: ExtensionContext): Promise<void> {
+		this.capture(ctx);
+		await this.openMenu(ctx);
 	}
 
 	/**
@@ -455,9 +447,10 @@ class SessionTidy {
 				{ label: `container digests.md${this.digestsContainer ? "" : " — no task, subtask off"}`, run: () => this.editContainer(ui, DIGESTS_CONTAINER) },
 				{ label: `container reports.md${this.reportsContainer ? "" : " — no task, subtask off"}`, run: () => this.editContainer(ui, REPORTS_CONTAINER) },
 				{ label: `container replies.md${this.repliesContainer ? "" : " — no task, subtask off"}`, run: () => this.editContainer(ui, REPLIES_CONTAINER) },
+				{ label: "counters report", run: () => this.notify(this.reportText(), "info") },
 				{ label: "dump thinking", run: () => this.dump() },
 			];
-			const choice = await ui.select(`session-tidy · ${this.statusText() ?? "off"}`, rows.map((row) => row.label));
+			const choice = await ui.select(`tidy · ${this.statusText() ?? "off"}`, rows.map((row) => row.label));
 			if (choice === undefined) return;
 			const row = rows.find((item) => item.label === choice);
 			await row?.run();
@@ -1002,10 +995,10 @@ class SessionTidy {
 		);
 	}
 
-	/** Detailed report for `/session-tidy` without arguments. */
+	/** Counters and spending behind the menu row. */
 	private reportText(): string {
 		return (
-			`session-tidy: ${this.enabled ? "on" : "off"} · ` +
+			`tidy: ${this.enabled ? "on" : "off"} · ` +
 			`digests ${this.activeDigests} · reports ${this.rewrittenReports} · ` +
 			`replies ${this.rewrittenReplies} · ` +
 			`saved ${formatTokens(this.savedThinkingTokens)} tokens · ` +

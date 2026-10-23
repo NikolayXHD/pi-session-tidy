@@ -17,8 +17,9 @@ streams.
 
 The file is `~/.pi/agent/session-tidy.json` (the former
 `~/.pi/agent/compact-thinking.json` is read when the new file is missing).
-Fields: `enabled`, `k`, `minTokens`, `acceptanceRatio`, `minReportTokens`,
-`debug`, `model`, `thinking`. A
+Fields: `k`, `minTokens`, `acceptanceRatio`, `minReportTokens`, `debug`,
+`model`, `thinking`. The mode is not a config field: tidy stays off until
+`/tidy`, and a leftover `enabled` field is reported by name. A
 missing file is created with the defaults and announced; an unusable value
 falls back to its default and is reported by name.
 
@@ -68,19 +69,20 @@ naming the reason.
 Run each scenario in an empty directory so the JSONL lands in its own place:
 `mkdir -p /tmp/session-tidy-check` and run `pi -p "..."` inside it.
 
-Status. At start the footer shows `💭 -…k/…k +…k`: savings, raw reasoning sum
-and generation of the background calls; after the first rewrite the counters
-follow — `✍ 2` for rewritten reports, `😞 1` for rewritten replies. While the
-background call runs, a spinner follows the balloon; while the mode is off the
-footer shows nothing.
-`/session-tidy` opens the settings menu — see the menu scenario below — and
-prints a detailed report with arguments; `off`/`on` toggle. Sums are
+Status. Without `/tidy` the footer shows nothing and no work runs. `/tidy`
+turns the mode on for this session and the footer shows `💭 -…k/…k +…k`:
+savings, raw reasoning sum and generation of the background calls; after the
+first rewrite the counters follow — `✍ 2` for rewritten reports, `😞 1` for
+rewritten replies. While the background call runs, a spinner follows the
+balloon.
+`/tidy-settings` opens the settings menu — see the menu scenario below; the
+counters report row prints digests, rewrites and spending. Sums are
 recomputed at every turn boundary, so in a running session with reasoning the
 second number must not stay zero.
 
-Settings menu. `/session-tidy` without arguments opens the menu with the state
-in the title and current values in the rows. Enter on a row changes the value
-and the menu stays open. The `mode (session)` and `report display (session)`
+Settings menu. `/tidy-settings` opens the menu with the state in the title and
+current values in the rows. Enter on a row changes the value and the menu
+stays open. The `mode (session)` and `report display (session)`
 rows change the running session only; the model, thinking level and number rows
 write the config file — after changing `k` the file holds the new value.
 Container rows open the text in the editor and save it on close.
@@ -106,7 +108,8 @@ The summarizer sees digests. A temporary logger extension on
 `session_before_compact` writes thinking block lengths from
 `preparation.messagesToSummarize`; those must be digests, not raw text.
 
-Context change. After a digest is applied, `/session-tidy` shows non-zero
+Context change. After a digest is applied, the counters report row shows
+non-zero
 digests and savings, while the raw text stays in the message entry.
 
 Tree navigation. Make several turns, then `/tree` to an earlier entry. The
@@ -121,10 +124,10 @@ Resume. Interrupt a session and resume it. Digests are restored from
 `session-tidy-applied` entries and substituted into the context again; the
 status matches the number of active entries.
 
-Disable. With `/session-tidy off` no new extension entries appear and the
-footer shows nothing until the mode is enabled again.
+Disable. `mode (session): off` in the menu — no new extension entries appear
+and the footer shows nothing until `/tidy` again.
 
-Dump. After several compactions `/session-tidy dump` writes `thinking-a`
+Dump. After several compactions the `dump thinking` row writes `thinking-a`
 and `thinking-b` next to the session JSONL; block headings match in both files,
 blocks follow session order, and `thinking-b` holds what the model sees. Diff
 recipes are in README, section Observability.
@@ -153,10 +156,10 @@ transcript keeps it as typed, the session JSONL gains a
 `session-tidy-report-applied` entry without `rewrittenText`, and the counters
 stay at zero.
 
-Debug display. With `/session-tidy debug on` the transcript keeps the raw
-report and shows the clear wording after it, below a separator; with `off` the
-text switches to the clear wording. The switch applies at render — moving the
-viewport or sending a message redraws the transcript.
+Debug display. With `report display (session): debug` the transcript keeps the
+raw report and shows the clear wording after it, below a separator; with
+`plain` the text switches to the clear wording. The switch applies at render —
+moving the viewport or sending a message redraws the transcript.
 
 Reply rewriting. Send a reply with caps lock and profanity. After the run
 settles the session JSONL gains a `session-tidy-reply-applied` entry and the

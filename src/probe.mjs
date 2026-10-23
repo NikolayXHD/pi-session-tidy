@@ -68,7 +68,6 @@ const attemptResult = (stopReason, content) => ({ stopReason, content });
 
 expectEqual("empty config gives defaults", parseConfig(undefined), { config: DEFAULT_CONFIG, problems: [] });
 const fullConfig = parseConfig({
-	enabled: false,
 	k: 2,
 	minTokens: 100,
 	acceptanceRatio: 0.5,
@@ -78,7 +77,6 @@ const fullConfig = parseConfig({
 	thinking: "high",
 });
 expectEqual("config fields are read", fullConfig.config, {
-	enabled: false,
 	k: 2,
 	minTokens: 100,
 	acceptanceRatio: 0.5,
@@ -96,10 +94,10 @@ expectEqual("broken fields are reported by name", brokenConfig.problems, [
 	"acceptanceRatio is 2: a number in (0, 1] is expected, the default is used",
 ]);
 expectEqual("fractional k rounds down", parseConfig({ k: 2.9 }).config.k, 2);
-const stringEnabled = parseConfig({ enabled: "false" });
-expectEqual("a string instead of enabled does not disable the mode", stringEnabled.config.enabled, true);
-expectEqual("a string instead of enabled is reported", stringEnabled.problems, [
-	'enabled is "false": a boolean is expected, the default is used',
+const obsoleteEnabled = parseConfig({ enabled: true });
+expectEqual("the removed enabled field leaves the defaults", obsoleteEnabled.config, DEFAULT_CONFIG);
+expectEqual("the removed enabled field is reported by name", obsoleteEnabled.problems, [
+	"enabled is no longer a config field: the mode starts on demand with /tidy",
 ]);
 expectEqual("acceptance ratio zero is not accepted", parseConfig({ acceptanceRatio: 0 }).config.acceptanceRatio, DEFAULT_CONFIG.acceptanceRatio);
 expectEqual("acceptance ratio one is allowed", parseConfig({ acceptanceRatio: 1 }).config.acceptanceRatio, 1);

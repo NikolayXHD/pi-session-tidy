@@ -54,25 +54,24 @@ how the session model writes, replies — the human's outbursts (@NikolayXHD:
 after its first rewrite. Spinner while a background call runs. While the mode
 is off the footer shows nothing.
 
-- `/session-tidy` — settings menu;
-- `/session-tidy on` / `off`;
-- `/session-tidy debug on` / `off` — show the clear wording after the original
-  report instead of replacing it;
-- `/session-tidy dump` — raw and compacted blocks next to the session file.
+- `/tidy` — turn the tidying on for this session; the status line appears;
+- `/tidy-settings` — the settings menu; its `mode (session)` row turns the
+  tidying off.
 
 ## Settings menu
 
-`/session-tidy` without arguments opens the menu: the title carries the state,
-row labels carry current values. Enter on a row changes the value and the menu
-stays open. The two session rows — `mode (session)` and
-`report display (session)` — change the running session only, so a session can
-flip without touching the config; every other row writes the config file. Model
-and thinking level open a picker, number rows open an input, container rows
-open the container text in the editor.
+`/tidy-settings` opens the menu: the title carries the state, row labels carry
+current values. Enter on a row changes the value and the menu stays open. The
+two session rows — `mode (session)` and `report display (session)` — change the
+running session only, so a session can flip without touching the config; every
+other row writes the config file. Model and thinking level open a picker,
+number rows open an input, container rows open the container text in the
+editor. `counters report` prints digests, rewrites and spending; `dump
+thinking` writes the thinking files.
 
 ## Observability
 
-`/session-tidy dump` writes two files next to the session JSONL:
+The `dump thinking` menu row writes two files next to the session JSONL:
 
 - `thinking-a` — the raw blocks as the model wrote them;
 - `thinking-b` — the same blocks as the model sees them, with digests in place.
@@ -111,11 +110,11 @@ pi install git:github.com/NikolayXHD/pi-session-tidy
 Settings: `~/.pi/agent/session-tidy.json`. The former
 `~/.pi/agent/compact-thinking.json` is read when the new file is missing. A
 missing settings file and a missing container are created with the default
-content and announced — nothing runs on a hidden default.
+content and announced — nothing runs on a hidden default. The mode is not a
+config field: tidy stays off until `/tidy` turns it on.
 
 | field             | default       | meaning                             |
 | ----------------- | ------------- | ----------------------------------- |
-| `enabled`         | `true`        | mode is on at session start         |
 | `k`               | `5`           | recent blocks that stay raw         |
 | `minTokens`       | `512`         | shorter blocks are left alone       |
 | `acceptanceRatio` | `0.95`        | a longer digest is rejected         |

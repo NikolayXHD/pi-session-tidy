@@ -6,7 +6,6 @@
  */
 
 export interface Config {
-	enabled: boolean;
 	/** How many last actions keep raw thinking blocks. */
 	k: number;
 	/** Blocks shorter than this are not compacted. */
@@ -24,7 +23,6 @@ export interface Config {
 }
 
 export const DEFAULT_CONFIG: Config = {
-	enabled: true,
 	k: 5,
 	minTokens: 512,
 	acceptanceRatio: 0.95,
@@ -64,8 +62,10 @@ export function parseConfig(raw: unknown): ParsedConfig {
 		return undefined;
 	};
 	let acceptanceRatio = DEFAULT_CONFIG.acceptanceRatio;
-	const enabled = flag("enabled", source.enabled, DEFAULT_CONFIG.enabled);
 	const k = count("k", source.k, DEFAULT_CONFIG.k);
+	if (source.enabled !== undefined) {
+		problems.push("enabled is no longer a config field: the mode starts on demand with /tidy");
+	}
 	const minTokens = count("minTokens", source.minTokens, DEFAULT_CONFIG.minTokens);
 	const minReportTokens = count("minReportTokens", source.minReportTokens, DEFAULT_CONFIG.minReportTokens);
 	const debug = flag("debug", source.debug, DEFAULT_CONFIG.debug);
@@ -80,7 +80,7 @@ export function parseConfig(raw: unknown): ParsedConfig {
 	const model = word("model", source.model);
 	const thinking = word("thinking", source.thinking);
 	return {
-		config: { enabled, k, minTokens, acceptanceRatio, minReportTokens, debug, model, thinking },
+		config: { k, minTokens, acceptanceRatio, minReportTokens, debug, model, thinking },
 		problems,
 	};
 }
