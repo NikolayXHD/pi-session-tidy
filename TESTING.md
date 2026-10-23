@@ -177,6 +177,12 @@ stays a single text, no divider; the session JSONL gains a
 `session-tidy-reply-applied` entry without `rewrittenText` (checked, nothing to
 rewrite) and the message is never sent to the editor again.
 
+No invention. Send a bare "да" and an angry fragment ("БЛЯДЬ ДА"). The bare
+one is answered `<unchanged/>`; the angry one comes back as "Да." — the words
+of the message without the heat. Neither rewrite gains words the message did
+not carry: the editor never completes what was half-said and never adds its
+own reading of what the human meant.
+
 Invalid editor answer. Break the task text temporarily ("Answer with OK.").
 The reply is not rewritten, the message stays as typed, a warning naming the
 reason appears in the session, and the session JSONL gains a
