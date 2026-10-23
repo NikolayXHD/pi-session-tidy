@@ -103,10 +103,10 @@ const DEFAULT_REPORT_TASK = [
 	"You are an editing tool, not the assistant in the transcript above.",
 	"",
 	"Rewrite the report quoted below so the reader understands it on the first",
-	"reading. Follow the writing rules from the context: one thought per",
-	"paragraph, concrete words, named actors instead of vague ones, no filler.",
-	"Keep every fact, decision, reason and open question of the original — the",
-	"rewrite may be longer, but nothing may be lost.",
+	"reading. Keep the voice: the rewrite is the assistant's own message to the",
+	"reader — restate it, never describe it. Follow the writing rules from the",
+	"context. Keep every fact, decision, reason and open question of the",
+	"original — the rewrite may be longer, but nothing may be lost.",
 	"",
 	"Wrap the result in <rewrite> and </rewrite> tags.",
 ].join("\n");
@@ -411,6 +411,7 @@ class SessionTidy {
 		}
 		if (command === "debug" || command === "debug on" || command === "debug off") {
 			this.debug = command === "debug" ? !this.debug : command === "debug on";
+			this.redrawMessages();
 			this.notify(`session-tidy: debug ${this.debug ? "on" : "off"}`, "info");
 			return;
 		}
