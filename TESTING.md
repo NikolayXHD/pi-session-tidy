@@ -60,7 +60,8 @@ Run each scenario in an empty directory so the JSONL lands in its own place:
 `mkdir -p /tmp/session-tidy-check` and run `pi -p "..."` inside it.
 
 Status. At start the footer shows `💭 -…k/…k +…k`: savings, raw reasoning sum
-and generation of the background calls. While the background call runs, a
+and generation of the background calls; after the first rewrite a report
+counter follows (`✍ 1`). While the background call runs, a
 spinner follows the balloon; while the mode is off the footer shows nothing.
 `/session-tidy` prints a detailed report, `off`/`on` toggle. Sums are
 recomputed at every turn boundary, so in a running session with reasoning the
