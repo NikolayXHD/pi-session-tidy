@@ -69,10 +69,11 @@ Substitution reaches the provider. A temporary logger extension on
 `reasoning_content` for assistant messages; in the log a raw block turns into a
 digest and stays that way in later requests.
 
-Editor context. Every background call carries the results of earlier
-transformations: with two digests applied, the request of the third call shows
-those digests where the raw blocks were. The same logger sees the background
-requests too — `before_provider_request` fires for them.
+Editor context. The background call carries the results of earlier
+transformations: its request is built from substituted messages — the same
+substitution the main requests use, which the logger scenario above verifies.
+Extension events do not fire for extension-initiated calls: the logger sees
+only the session requests, not the editor ones.
 
 The summarizer sees digests. A temporary logger extension on
 `session_before_compact` writes thinking block lengths from
