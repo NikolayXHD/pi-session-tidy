@@ -6,8 +6,8 @@
  *
  * Первый способ улучшения: модель видит сырое мышление последних K действий,
  * более старые блоки доходят до неё короткими конспектами. Конспект делает
- * фоновый вызов той же модели по тому же префиксу сессии, поэтому провайдер
- * читает его из горячего кеша.
+ * фоновый вызов по префиксу сессии; модель, thinking level и текст задачи
+ * лежат в контейнере подзадачи и в JSON-конфиге (README.md).
  *
  * Digests are substituted into the context on the fly by one function:
  * - in `context`, before the main model request;
@@ -21,7 +21,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { getCurrentTools, type Message } from "@earendil-works/pi-ai";
+import { getCurrentTools, type Message, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import {
 	convertToLlm,
 	getAgentDir,
@@ -44,10 +44,12 @@ import {
 	isThinkingBlock,
 	keepsSignature,
 	parseConfig,
+	parseContainer,
 	selectCandidates,
 	validateCompaction,
 	type Candidate,
 	type Config,
+	type Container,
 	type VisibleAssistant,
 } from "./logic";
 
@@ -67,8 +69,11 @@ const MAX_ATTEMPTS = 3;
 /** Status spinner frames: they take the place of the space while the job runs. */
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 100;
+/** Container directory next to the config file: per-subtask settings. */
+const CONTAINER_DIR = "session-tidy";
+const DIGESTS_CONTAINER = "digests";
 
-const COMPACTION_PROMPT = [
+const DEFAULT_DIGEST_TASK = [
 	"You are a compression tool, not the assistant in the transcript above.",
 	"",
 	"Rewrite the thinking block quoted below in the same language, shorter, cleaner",
@@ -132,11 +137,6 @@ function configPath(): string {
 	return join(getAgentDir(), "session-tidy.json");
 }
 
-/** Config of the former extension name: read so old setups keep working. */
-function legacyConfigPath(): string {
-	return join(getAgentDir(), "compact-thinking.json");
-}
-
 function loadConfig(): { config: Config; problem?: string } {
 	for (const path of [configPath(), legacyConfigPath()]) {
 		try {
@@ -150,8 +150,35 @@ function loadConfig(): { config: Config; problem?: string } {
 	return { config: DEFAULT_CONFIG };
 }
 
-function buildRequestText(blockText: string): string {
-	return `${COMPACTION_PROMPT}\n\n<thinking_block>\n${blockText}\n</thinking_block>`;
+/** Config of the former extension name: read so old setups keep working. */
+function legacyConfigPath(): string {
+	return join(getAgentDir(), "compact-thinking.json");
+}
+
+function containerPath(name: string): string {
+	return join(getAgentDir(), CONTAINER_DIR, `${name}.md`);
+}
+
+/** A missing container falls back to the built-in task text without a warning. */
+function loadContainer(name: string, fallbackTask: string): { container: Container; problem?: string } {
+	const path = containerPath(name);
+	try {
+		const container = parseContainer(readFileSync(path, "utf8"));
+		if (container.task === "") {
+			return { container: { ...container, task: fallbackTask }, problem: `${path}: empty task text, built-in text used` };
+		}
+		return { container };
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			return { container: { task: fallbackTask } };
+		}
+		const message = error instanceof Error ? error.message : String(error);
+		return { container: { task: fallbackTask }, problem: `${path}: ${message}` };
+	}
+}
+
+function buildRequestText(task: string, blockText: string): string {
+	return `${task}\n\n<thinking_block>\n${blockText}\n</thinking_block>`;
 }
 
 /** Estimated like Pi does: four characters per token. */
@@ -160,7 +187,8 @@ const estimate = (text: string): number => Math.ceil(text.length / 4);
 class SessionTidy {
 	private readonly pi: ExtensionAPI;
 	private readonly config: Config;
-	private readonly configProblem: string | undefined;
+	private readonly problems: string[];
+	private readonly digestsContainer: Container;
 	private readonly warned = new Set<string>();
 	private readonly appliedRecords = new Map<string, AppliedRecord>();
 	private readonly rejected = new Map<string, string>();
@@ -198,7 +226,11 @@ class SessionTidy {
 		this.pi = pi;
 		const loaded = loadConfig();
 		this.config = loaded.config;
-		this.configProblem = loaded.problem;
+		const digests = loadContainer(DIGESTS_CONTAINER, DEFAULT_DIGEST_TASK);
+		this.digestsContainer = digests.container;
+		this.problems = [];
+		if (loaded.problem) this.problems.push(loaded.problem);
+		if (digests.problem) this.problems.push(digests.problem);
 		this.enabled = loaded.config.enabled;
 
 		pi.on("session_start", (_event, ctx) => this.onSessionStart(ctx));
@@ -222,7 +254,9 @@ class SessionTidy {
 		this.systemOptions = undefined;
 		this.enabled = this.config.enabled;
 		this.rebuild();
-		if (this.configProblem) this.warn(`session-tidy: ${this.configProblem}`);
+		if (this.problems.length > 0) {
+			for (const problem of this.problems) this.warn(`session-tidy: ${problem}`);
+		}
 		this.updateStatus();
 	}
 
@@ -419,7 +453,8 @@ class SessionTidy {
 	private async compact(candidate: Candidate): Promise<void> {
 		const manager = this.manager;
 		const registry = this.registry;
-		const model = this.model;
+		const container = this.digestsContainer;
+		const model = this.editorModel(container.model ?? this.config.model);
 		if (!manager || !registry || !model) return;
 		const generation = this.generation;
 		const projection = manager.buildSessionProjection();
@@ -439,16 +474,18 @@ class SessionTidy {
 				: messages;
 		prefix.push({
 			role: "user",
-			content: [{ type: "text", text: buildRequestText(candidate.text) }],
+			content: [{ type: "text", text: buildRequestText(container.task, candidate.text) }],
 			timestamp: Date.now(),
 		});
 
 		const controller = new AbortController();
 		this.job = controller;
 		try {
+			const reasoning = (container.thinking ?? this.config.thinking) as SimpleStreamOptions["reasoning"];
 			const stream = registry.streamSimple(model, { messages: prefix }, {
 				maxTokens: Math.max(512, candidate.tokens),
 				toolChoice: "none",
+				...(reasoning !== undefined ? { reasoning } : {}),
 				sessionId: manager.getSessionId(),
 				signal: controller.signal,
 			});
@@ -503,6 +540,26 @@ class SessionTidy {
 		} finally {
 			this.job = undefined;
 		}
+	}
+
+	/**
+	 * Model of a background call: the container override, the config base, or
+	 * the session model. The setting names the model as `provider/model-id`.
+	 */
+	private editorModel(spec: string | undefined) {
+		const registry = this.registry;
+		if (!spec || !registry) return this.model;
+		const separator = spec.indexOf("/");
+		if (separator <= 0) {
+			this.warn(`session-tidy: "${spec}" is not provider/model-id`);
+			return this.model;
+		}
+		const found = registry.find(spec.slice(0, separator), spec.slice(separator + 1));
+		if (!found) {
+			this.warn(`session-tidy: model "${spec}" is not found`);
+			return this.model;
+		}
+		return found;
 	}
 
 	/** One background job: walk the candidates while there are any. */

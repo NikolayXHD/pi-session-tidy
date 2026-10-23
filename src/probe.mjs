@@ -1,6 +1,7 @@
 // Direct run of the extension rules through Node's type stripping: no Pi session.
 import {
 	parseConfig,
+	parseContainer,
 	DEFAULT_CONFIG,
 	blockKey,
 	canReplay,
@@ -17,8 +18,20 @@ import {
 
 let passed = 0;
 let failed = 0;
+/** Key order and undefined values do not matter, like in JSON. */
+const canonical = (value) => {
+	if (Array.isArray(value)) return `[${value.map((item) => canonical(item)).join(",")}]`;
+	if (value !== null && typeof value === "object") {
+		const entries = Object.keys(value)
+			.sort()
+			.filter((key) => value[key] !== undefined)
+			.map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`);
+		return `{${entries.join(",")}}`;
+	}
+	return JSON.stringify(value) ?? "null";
+};
 const expectEqual = (name, got, want) => {
-	if (JSON.stringify(got) === JSON.stringify(want)) {
+	if (canonical(got) === canonical(want)) {
 		passed += 1;
 		return;
 	}
@@ -60,6 +73,31 @@ expectEqual("fractional k rounds down", parseConfig({ k: 2.9 }).k, 2);
 expectEqual("a string instead of enabled does not disable the mode", parseConfig({ enabled: "false" }).enabled, true);
 expectEqual("acceptance ratio zero is not accepted", parseConfig({ acceptanceRatio: 0 }).acceptanceRatio, DEFAULT_CONFIG.acceptanceRatio);
 expectEqual("acceptance ratio one is allowed", parseConfig({ acceptanceRatio: 1 }).acceptanceRatio, 1);
+const configWithEditor = parseConfig({ model: "deepseek/deepseek-flash", thinking: "high" });
+expectEqual("the editor model is read from the config", configWithEditor.model, "deepseek/deepseek-flash");
+expectEqual("the editor thinking level is read from the config", configWithEditor.thinking, "high");
+expectEqual("an empty model is ignored", parseConfig({ model: "   " }).model, undefined);
+expectEqual("a non-string model is ignored", parseConfig({ model: 7 }).model, undefined);
+
+const containerText = ["---", "model: deepseek/deepseek-flash", "thinking: high", "---", "", "Rewrite the block."].join("\n");
+expectEqual("the container keeps model, thinking and task", parseContainer(containerText), {
+	model: "deepseek/deepseek-flash",
+	thinking: "high",
+	task: "Rewrite the block.",
+});
+expectEqual("without frontmatter the whole file is the task", parseContainer("Just the task."), { task: "Just the task." });
+expectEqual(
+	"an unclosed fence leaves the file as the task",
+	parseContainer(["---", "model: a/b", "Just the task."].join("\n")),
+	{ task: ["---", "model: a/b", "Just the task."].join("\n") },
+);
+expectEqual("unknown keys are ignored", parseContainer(["---", "name: digests", "---", "Task."].join("\n")), { task: "Task." });
+expectEqual("an empty value is ignored", parseContainer(["---", "model:", "---", "Task."].join("\n")), { task: "Task." });
+expectEqual(
+	"a line without a separator is ignored",
+	parseContainer(["---", "model: a/b", "nonsense", "---", "Task."].join("\n")),
+	{ model: "a/b", task: "Task." },
+);
 
 expectTrue("reasoning_content is a reasoning signature", keepsSignature("reasoning_content"));
 expectTrue("reasoning is a reasoning signature", keepsSignature("reasoning"));

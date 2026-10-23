@@ -60,18 +60,40 @@ pi install git:github.com/NikolayXHD/pi-session-tidy
 Settings: `~/.pi/agent/session-tidy.json`. The former
 `~/.pi/agent/compact-thinking.json` is read when the new file is missing.
 
-| field             | default | meaning                       |
-| ----------------- | ------- | ----------------------------- |
-| `enabled`         | `true`  | mode is on at session start   |
-| `k`               | `5`     | recent blocks that stay raw   |
-| `minTokens`       | `512`   | shorter blocks are left alone |
-| `acceptanceRatio` | `0.95`  | a longer digest is rejected   |
+| field             | default       | meaning                       |
+| ----------------- | ------------- | ----------------------------- |
+| `enabled`         | `true`        | mode is on at session start   |
+| `k`               | `5`           | recent blocks that stay raw   |
+| `minTokens`       | `512`         | shorter blocks are left alone |
+| `acceptanceRatio` | `0.95`        | a longer digest is rejected   |
+| `model`           | session model | model of the background calls |
+| `thinking`        | none          | thinking level of the calls   |
+
+## Containers
+
+Per-subtask settings live in `~/.pi/agent/session-tidy/`: one markdown file per
+subtask, the digests subtask uses `digests.md`. Frontmatter holds `model` and
+`thinking` — overrides of the config base — the body is the task text for the
+background model. The extension reads the files itself: pi subagents do not see
+them.
+
+```markdown
+---
+model: deepseek/deepseek-flash
+thinking: high
+---
+
+Rewrite the thinking block quoted below in the same language, shorter …
+```
+
+Without the file the built-in task text is used.
 
 ## How it works
 
-A digest is a separate call of the same model over the same session prefix, so
-the provider reads it from the warm cache: no tools, no reasoning, the answer
-wrapped in `<digest>…</digest>`.
+A digest is a separate call over the same session prefix: no tools, the answer
+wrapped in `<digest>…</digest>`. The call goes to the model named by `model` —
+the config base, overridden by the container; without `model` it is the session
+model, and then the provider reads the request from the warm cache.
 
 Digests are substituted into the context by one function called in `context`
 (before the main model request) and in `session_before_compact` (before Pi's

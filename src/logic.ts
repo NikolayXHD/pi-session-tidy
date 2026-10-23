@@ -13,6 +13,10 @@ export interface Config {
 	minTokens: number;
 	/** A digest longer than this fraction of the source block is rejected. */
 	acceptanceRatio: number;
+	/** Base model of the background calls: `provider/model-id`. */
+	model?: string;
+	/** Base thinking level of the background calls. */
+	thinking?: string;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -27,12 +31,55 @@ export function parseConfig(raw: unknown): Config {
 	const number = (value: unknown, fallback: number): number =>
 		typeof value === "number" && Number.isFinite(value) ? value : fallback;
 	const ratio = number(source.acceptanceRatio, DEFAULT_CONFIG.acceptanceRatio);
+	const text = (value: unknown): string | undefined =>
+		typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 	return {
 		enabled: typeof source.enabled === "boolean" ? source.enabled : DEFAULT_CONFIG.enabled,
 		k: Math.max(0, Math.floor(number(source.k, DEFAULT_CONFIG.k))),
 		minTokens: Math.max(0, Math.floor(number(source.minTokens, DEFAULT_CONFIG.minTokens))),
 		acceptanceRatio: ratio > 0 && ratio <= 1 ? ratio : DEFAULT_CONFIG.acceptanceRatio,
+		model: text(source.model),
+		thinking: text(source.thinking),
 	};
+}
+
+/** Per-subtask settings: the model fields override the config base. */
+export interface Container {
+	/** Model override for this subtask: `provider/model-id`. */
+	model?: string;
+	/** Thinking level override for this subtask. */
+	thinking?: string;
+	/** Task text the background model receives. */
+	task: string;
+}
+
+/**
+ * Frontmatter as in agents/*.md: `key: value` lines between `---` fences, the
+ * body is the task text. Flat scalars only; unknown keys are ignored. Without
+ * frontmatter the whole file is the task text.
+ */
+export function parseContainer(raw: string): Container {
+	const lines = raw.split(/\r?\n/);
+	if (lines[0]?.trim() !== "---") return { task: raw.trim() };
+	let close = -1;
+	for (let index = 1; index < lines.length; index += 1) {
+		if (lines[index].trim() === "---") {
+			close = index;
+			break;
+		}
+	}
+	if (close < 0) return { task: raw.trim() };
+	const container: Container = { task: lines.slice(close + 1).join("\n").trim() };
+	for (const line of lines.slice(1, close)) {
+		const separator = line.indexOf(":");
+		if (separator < 0) continue;
+		const key = line.slice(0, separator).trim();
+		const value = line.slice(separator + 1).trim();
+		if (value === "") continue;
+		if (key === "model") container.model = value;
+		else if (key === "thinking") container.thinking = value;
+	}
+	return container;
 }
 
 export interface ThinkingBlock {
