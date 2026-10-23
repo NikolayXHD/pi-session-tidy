@@ -551,7 +551,7 @@ export interface StatusCounts {
 	generatedTokens: number;
 	/** Reports rewritten in the current context: how badly the model writes. */
 	rewrittenReports: number;
-	/** Replies rewritten in the current context: the human's outbursts. */
+	/** Replies rewritten in the current context: the human's outbursts, marked 😞. */
 	rewrittenReplies: number;
 }
 
@@ -561,7 +561,7 @@ export function formatStatusText(counts: StatusCounts, spinnerFrame = " "): stri
 	const separator = counts.running ? spinnerFrame : " ";
 	const saved = counts.rawThinkingTokens - counts.contextThinkingTokens;
 	const savedText = saved > 0 ? `-${formatTokens(saved)}` : "0";
-	const rewritten = counts.rewrittenReports + counts.rewrittenReplies;
-	const counters = rewritten > 0 ? ` ✍ ${counts.rewrittenReports}/${counts.rewrittenReplies}` : "";
-	return `💭${separator}${savedText}/${formatTokens(counts.rawThinkingTokens)} +${formatTokens(counts.generatedTokens)}${counters}`;
+	const reports = counts.rewrittenReports > 0 ? ` ✍ ${counts.rewrittenReports}` : "";
+	const replies = counts.rewrittenReplies > 0 ? ` 😞 ${counts.rewrittenReplies}` : "";
+	return `💭${separator}${savedText}/${formatTokens(counts.rawThinkingTokens)} +${formatTokens(counts.generatedTokens)}${reports}${replies}`;
 }

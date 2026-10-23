@@ -45,14 +45,14 @@ not from the noise.
 
 ## What you see
 
-Footer: `💭 -40k/120k +76k ✍ 2/1` — reasoning tokens saved, raw reasoning
+Footer: `💭 -40k/120k +76k ✍ 2 😞 1` — reasoning tokens saved, raw reasoning
 tokens in context, tokens spent by the background calls, and two rewrite
-counters: rewritten reports / rewritten replies. Only texts that had a problem
-are rewritten, so both counters count writing problems: reports show how the
-session model writes, replies — the human's outbursts (@NikolayXHD: «счётчик
-моей печали»), a quality signal of the model too. The counters appear after the
-first rewrite. Spinner while a background call runs. While the mode is off the
-footer shows nothing.
+counters: `✍` rewritten reports, `😞` rewritten replies. Only texts that had a
+problem are rewritten, so both counters count writing problems: reports show
+how the session model writes, replies — the human's outbursts (@NikolayXHD:
+«счётчик моей печали»), a quality signal of the model too. A counter appears
+after its first rewrite. Spinner while a background call runs. While the mode
+is off the footer shows nothing.
 
 - `/session-tidy` — settings menu;
 - `/session-tidy on` / `off`;

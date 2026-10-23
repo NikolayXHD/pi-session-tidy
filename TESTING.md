@@ -69,8 +69,8 @@ Run each scenario in an empty directory so the JSONL lands in its own place:
 `mkdir -p /tmp/session-tidy-check` and run `pi -p "..."` inside it.
 
 Status. At start the footer shows `💭 -…k/…k +…k`: savings, raw reasoning sum
-and generation of the background calls; after the first rewrite the two
-counters follow (`✍ 2/1` — rewritten reports / rewritten replies). While the
+and generation of the background calls; after the first rewrite the counters
+follow — `✍ 2` for rewritten reports, `😞 1` for rewritten replies. While the
 background call runs, a spinner follows the balloon; while the mode is off the
 footer shows nothing.
 `/session-tidy` opens the settings menu — see the menu scenario below — and
@@ -146,7 +146,7 @@ model.
 Report rewriting. Ask for a long final answer with a problem — jargon or
 tangled categories. After the run settles the session JSONL gains a
 `session-tidy-report-applied` entry and the transcript switches from the raw
-text to the clear wording. The footer counters show `✍ 1/0`.
+text to the clear wording. The footer counter shows `✍ 1`.
 
 Clear report. Ask for a long final answer that is already well-formed. The
 transcript keeps it as typed, the session JSONL gains a
@@ -162,7 +162,7 @@ Reply rewriting. Send a reply with caps lock and profanity. After the run
 settles the session JSONL gains a `session-tidy-reply-applied` entry and the
 reply shows both texts in one message: the raw wording as typed, a divider,
 and the clear wording below it. The rewrite extracts the demand: the force
-survives as content, the noise does not.
+survives as content, the noise does not. The footer counter shows `😞 1`.
 
 Calm reply. Send a calm short reply — "ok", a plain question. The message
 stays a single text, no divider; the session JSONL gains a

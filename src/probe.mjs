@@ -437,10 +437,10 @@ expectEqual(
 		rewrittenReports: 3,
 		rewrittenReplies: 2,
 	}),
-	"💭 0/100 +0 ✍ 3/2",
+	"💭 0/100 +0 ✍ 3 😞 2",
 );
 expectEqual(
-	"the counters appear with the first rewritten reply",
+	"the reply counter carries the sadness mark",
 	formatStatusText({
 		enabled: true,
 		running: false,
@@ -450,7 +450,20 @@ expectEqual(
 		rewrittenReports: 0,
 		rewrittenReplies: 1,
 	}),
-	"💭 0/100 +0 ✍ 0/1",
+	"💭 0/100 +0 😞 1",
+);
+expectEqual(
+	"the report counter appears alone",
+	formatStatusText({
+		enabled: true,
+		running: false,
+		rawThinkingTokens: 100,
+		contextThinkingTokens: 100,
+		generatedTokens: 0,
+		rewrittenReports: 3,
+		rewrittenReplies: 0,
+	}),
+	"💭 0/100 +0 ✍ 3",
 );
 expectEqual(
 	"without rewrites the counters are absent",
