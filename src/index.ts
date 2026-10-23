@@ -995,7 +995,8 @@ class SessionTidy {
 				rawThinkingTokens: this.rawThinkingTokens,
 				contextThinkingTokens: this.rawThinkingTokens - this.savedThinkingTokens,
 				generatedTokens: this.spentOutput,
-				rewrittenTexts: this.rewrittenReports + this.rewrittenReplies,
+				rewrittenReports: this.rewrittenReports,
+				rewrittenReplies: this.rewrittenReplies,
 			},
 			frame,
 		);

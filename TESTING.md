@@ -48,14 +48,15 @@ Rules live in probe.mjs. Session consequences:
   or cancellation rejection leaves the block in the queue, but not more than
   three attempts per session.
 
-Reports are rewritten on other terms: a final answer longer than
+Reports are checked on other terms: a final answer longer than
 `minReportTokens` qualifies, a message with tool calls does not; the raw zone
-`k` does not apply to reports. The acceptance checks the form only and never
-the length: the answer carries exactly one of `<unchanged/>` and
-`<rewrite>…</rewrite>`, the rewrite is not empty and carries no tool-call
-markup; a rewrite may be longer than the original. A rewrite equal to the
-source is not a replacement — the text stays as typed. A report whose text was
-changed by a foreign `context_edit` is left alone.
+`k` does not apply to reports. Only a report that has a problem is rewritten;
+a clear one is marked `<unchanged/>` and stays as typed. The acceptance checks
+the form only and never the length: the answer carries exactly one of
+`<unchanged/>` and `<rewrite>…</rewrite>`, the rewrite is not empty and carries
+no tool-call markup; a rewrite may be longer than the original. A rewrite equal
+to the source is not a replacement — the text stays as typed. A report whose
+text was changed by a foreign `context_edit` is left alone.
 
 Replies are checked without a threshold but rewritten only when the message
 has a problem: the editor marks a calm one `<unchanged/>` and the message stays
@@ -68,9 +69,10 @@ Run each scenario in an empty directory so the JSONL lands in its own place:
 `mkdir -p /tmp/session-tidy-check` and run `pi -p "..."` inside it.
 
 Status. At start the footer shows `💭 -…k/…k +…k`: savings, raw reasoning sum
-and generation of the background calls; after the first rewrite a report
-counter follows (`✍ 1`). While the background call runs, a
-spinner follows the balloon; while the mode is off the footer shows nothing.
+and generation of the background calls; after the first rewrite the two
+counters follow (`✍ 2/1` — rewritten reports / rewritten replies). While the
+background call runs, a spinner follows the balloon; while the mode is off the
+footer shows nothing.
 `/session-tidy` opens the settings menu — see the menu scenario below — and
 prints a detailed report with arguments; `off`/`on` toggle. Sums are
 recomputed at every turn boundary, so in a running session with reasoning the
@@ -141,10 +143,15 @@ go to that model — a temporary logger on `before_provider_request` writes the
 model name. An unknown model name warns once and falls back to the session
 model.
 
-Report rewriting. Ask for a long final answer — a report over
-`minReportTokens`. After the run settles the session JSONL gains a
-`session-tidy-report-applied` entry, and the transcript switches from the raw
-text to the clear wording. The footer shows the counter (`✍ 1`).
+Report rewriting. Ask for a long final answer with a problem — jargon or
+tangled categories. After the run settles the session JSONL gains a
+`session-tidy-report-applied` entry and the transcript switches from the raw
+text to the clear wording. The footer counters show `✍ 1/0`.
+
+Clear report. Ask for a long final answer that is already well-formed. The
+transcript keeps it as typed, the session JSONL gains a
+`session-tidy-report-applied` entry without `rewrittenText`, and the counters
+stay at zero.
 
 Debug display. With `/session-tidy debug on` the transcript keeps the raw
 report and shows the clear wording after it, below a separator; with `off` the

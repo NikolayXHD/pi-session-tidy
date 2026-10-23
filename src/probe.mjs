@@ -427,13 +427,42 @@ expectEqual("a message without text has no foreign text", foreignChangedText([th
 expectEqual("message text joins the text blocks", messageText([thinkingBlock("thought"), textBlock(" first "), textBlock("second")]), "first\nsecond");
 expectEqual("normalization collapses whitespace", normalizeText(" a\n\n b "), "a b");
 expectEqual(
-	"the status shows the rewritten reports counter",
-	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 100, contextThinkingTokens: 100, generatedTokens: 0, rewrittenTexts: 3 }),
-	"💭 0/100 +0 ✍ 3",
+	"the status shows both rewrite counters: reports and replies",
+	formatStatusText({
+		enabled: true,
+		running: false,
+		rawThinkingTokens: 100,
+		contextThinkingTokens: 100,
+		generatedTokens: 0,
+		rewrittenReports: 3,
+		rewrittenReplies: 2,
+	}),
+	"💭 0/100 +0 ✍ 3/2",
 );
 expectEqual(
-	"without rewrites the counter is absent",
-	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 100, contextThinkingTokens: 100, generatedTokens: 0, rewrittenTexts: 0 }),
+	"the counters appear with the first rewritten reply",
+	formatStatusText({
+		enabled: true,
+		running: false,
+		rawThinkingTokens: 100,
+		contextThinkingTokens: 100,
+		generatedTokens: 0,
+		rewrittenReports: 0,
+		rewrittenReplies: 1,
+	}),
+	"💭 0/100 +0 ✍ 0/1",
+);
+expectEqual(
+	"without rewrites the counters are absent",
+	formatStatusText({
+		enabled: true,
+		running: false,
+		rawThinkingTokens: 100,
+		contextThinkingTokens: 100,
+		generatedTokens: 0,
+		rewrittenReports: 0,
+		rewrittenReplies: 0,
+	}),
 	"💭 0/100 +0",
 );
 
@@ -445,27 +474,38 @@ expectEqual("tens of thousands", formatTokens(150000), "150k");
 expectEqual("zero tokens", formatTokens(0), "0");
 expectEqual(
 	"the disabled mode leaves no status",
-	formatStatusText({ enabled: false, running: false, rawThinkingTokens: 0, contextThinkingTokens: 0, generatedTokens: 0 }),
+	formatStatusText({ enabled: false, running: false, rawThinkingTokens: 0, contextThinkingTokens: 0, generatedTokens: 0, rewrittenReports: 0, rewrittenReplies: 0 }),
 	undefined,
 );
 expectEqual(
 	"the status shows savings, raw sum and generation",
-	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 120000, contextThinkingTokens: 80000, generatedTokens: 76000 }),
+	formatStatusText({
+		enabled: true,
+		running: false,
+		rawThinkingTokens: 120000,
+		contextThinkingTokens: 80000,
+		generatedTokens: 76000,
+		rewrittenReports: 0,
+		rewrittenReplies: 0,
+	}),
 	"💭 -40k/120k +76k",
 );
 expectEqual(
 	"a spinner frame takes the space while running",
-	formatStatusText({ enabled: true, running: true, rawThinkingTokens: 120000, contextThinkingTokens: 80000, generatedTokens: 76000 }, "⠹"),
+	formatStatusText(
+		{ enabled: true, running: true, rawThinkingTokens: 120000, contextThinkingTokens: 80000, generatedTokens: 76000, rewrittenReports: 0, rewrittenReplies: 0 },
+		"⠹",
+	),
 	"💭⠹-40k/120k +76k",
 );
 expectEqual(
 	"without compaction savings are zero",
-	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 5000, contextThinkingTokens: 5000, generatedTokens: 0 }),
+	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 5000, contextThinkingTokens: 5000, generatedTokens: 0, rewrittenReports: 0, rewrittenReplies: 0 }),
 	"💭 0/5k +0",
 );
 expectEqual(
 	"empty context",
-	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 0, contextThinkingTokens: 0, generatedTokens: 0 }),
+	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 0, contextThinkingTokens: 0, generatedTokens: 0, rewrittenReports: 0, rewrittenReplies: 0 }),
 	"💭 0/0 +0",
 );
 

@@ -13,11 +13,13 @@ questions survive, repetition and filler do not. Recent blocks stay raw.
 
 ## Reports: clear wording
 
-A report longer than `minReportTokens` is rewritten to be understood on the
-first reading: one thought per paragraph, concrete words, named actors. Every
-fact, decision and open question of the original survives — the rewrite may be
-longer, reports are not compressed. The clear wording replaces the raw report
-in the model context and in the transcript.
+A report longer than `minReportTokens` is checked and rewritten only when it
+has a problem — hard to understand on the first reading. A clear report is
+answered with `<unchanged/>` and stays as typed: every rewrite must be worth
+its place. The rewrite takes one thought per paragraph, concrete words, named
+actors. Every fact, decision and open question of the original survives — the
+rewrite may be longer, reports are not compressed. The clear wording replaces
+the raw report in the model context and in the transcript.
 
 While the rewrite is being prepared the raw report is on screen — the model
 streams it live and streaming cannot be held. When the clear wording arrives,
@@ -43,9 +45,14 @@ not from the noise.
 
 ## What you see
 
-Footer: `💭 -40k/120k +76k ✍ 2` — reasoning tokens saved, raw reasoning tokens
-in context, tokens spent by the background calls, reports rewritten. Spinner
-while a background call runs. While the mode is off the footer shows nothing.
+Footer: `💭 -40k/120k +76k ✍ 2/1` — reasoning tokens saved, raw reasoning
+tokens in context, tokens spent by the background calls, and two rewrite
+counters: rewritten reports / rewritten replies. Only texts that had a problem
+are rewritten, so both counters count writing problems: reports show how the
+session model writes, replies — the human's outbursts (@NikolayXHD: «счётчик
+моей печали»), a quality signal of the model too. The counters appear after the
+first rewrite. Spinner while a background call runs. While the mode is off the
+footer shows nothing.
 
 - `/session-tidy` — settings menu;
 - `/session-tidy on` / `off`;
