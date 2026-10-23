@@ -112,8 +112,11 @@ const DEFAULT_REPORT_TASK = [
 	"Rewrite the report quoted below so the reader understands it on the first",
 	"reading. Keep the voice: the rewrite is the assistant's own message to the",
 	"reader — restate it, never describe it. Follow the writing rules from the",
-	"context. Keep every fact, decision, reason and open question of the",
-	"original — the rewrite may be longer, but nothing may be lost.",
+	"context. When the content sorts things into categories — what is covered and",
+	"what is not, for and against, variants — give those as explicit lists with",
+	"concrete names, not as flowing prose. Keep every fact, decision, reason and",
+	"open question of the original — the rewrite may be longer, but nothing may",
+	"be lost.",
 	"",
 	"Wrap the result in <rewrite> and </rewrite> tags.",
 ].join("\n");
