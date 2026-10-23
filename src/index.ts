@@ -1071,7 +1071,6 @@ class SessionTidy {
 	private redrawMessages(): void {
 		try {
 			this.ui?.setHiddenThinkingLabel();
-			this.ui?.setTheme(this.ui.theme);
 		} catch {
 			// Stale UI after a session replacement.
 		}
