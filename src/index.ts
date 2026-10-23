@@ -285,13 +285,13 @@ function buildRequestText(task: string, tag: string, text: string): string {
 const estimate = (text: string): number => Math.ceil(text.length / 4);
 
 class SessionTidy {
-	private readonly pi: ExtensionAPI;
-	private readonly config: Config;
+	private pi: ExtensionAPI;
+	private config: Config;
 	private readonly problems: string[];
 	private readonly created: string[];
-	private readonly digestsContainer: Container;
-	private readonly reportsContainer: Container;
-	private readonly repliesContainer: Container;
+	private digestsContainer: Container;
+	private reportsContainer: Container;
+	private repliesContainer: Container;
 	private readonly announced = new Set<string>();
 	private readonly appliedRecords = new Map<string, AppliedRecord>();
 	private readonly rejected = new Map<string, string>();
@@ -362,7 +362,7 @@ class SessionTidy {
 		pi.registerEntryRenderer(REPLY_ENTRY, (entry) => this.renderReply(entry.data));
 		pi.registerMarkdownTransformer((markdown, context) => this.transformMarkdown(markdown, context));
 		pi.registerCommand("session-tidy", {
-			description: "Tidy the session: report, on, off, debug on|off, dump",
+			description: "Tidy the session: menu; shortcuts: report, on, off, debug on|off, dump",
 			handler: async (args, ctx) => this.onCommand(args, ctx),
 		});
 	}
@@ -427,9 +427,13 @@ class SessionTidy {
 		setTimeout(() => void this.pump(), 0);
 	}
 
-	private onCommand(args: string, ctx: ExtensionContext): void {
+	private async onCommand(args: string, ctx: ExtensionContext): Promise<void> {
 		this.capture(ctx);
 		const command = args.trim().toLowerCase();
+		if (command === "") {
+			await this.openMenu(ctx);
+			return;
+		}
 		if (command === "on" || command === "off") {
 			this.enabled = command === "on";
 			this.updateStatus();
@@ -449,6 +453,139 @@ class SessionTidy {
 		}
 		this.updateStatus();
 		this.notify(this.reportText(), "info");
+	}
+
+	/**
+	 * The settings menu. A row changes its value and the menu stays open; the
+	 * title carries the current state. Session rows change the running session
+	 * only, the rest is written to the config file.
+	 */
+	private async openMenu(ctx: ExtensionContext): Promise<void> {
+		const ui = ctx.ui;
+		for (;;) {
+			const rows: { label: string; run: () => void | Promise<void> }[] = [
+				{
+					label: `режим (сессия): ${this.enabled ? "on" : "off"}`,
+					run: () => {
+						this.enabled = !this.enabled;
+						this.updateStatus();
+						if (this.enabled) setTimeout(() => void this.pump(), 0);
+					},
+				},
+				{
+					label: `показ докладов (сессия): ${this.debug ? "отладочный" : "обычный"}`,
+					run: () => {
+						this.debug = !this.debug;
+						this.redrawMessages();
+					},
+				},
+				{ label: `модель-редактор: ${this.config.model ?? "модель сессии"}`, run: () => this.pickModel(ui) },
+				{ label: `thinking level: ${this.config.thinking ?? "нет"}`, run: () => this.pickThinking(ui) },
+				{ label: `k: ${this.config.k}`, run: () => this.pickCount(ui, "k", this.config.k, (value) => (this.config = { ...this.config, k: value })) },
+				{
+					label: `minTokens: ${this.config.minTokens}`,
+					run: () => this.pickCount(ui, "minTokens", this.config.minTokens, (value) => (this.config = { ...this.config, minTokens: value })),
+				},
+				{
+					label: `minReportTokens: ${this.config.minReportTokens}`,
+					run: () =>
+						this.pickCount(ui, "minReportTokens", this.config.minReportTokens, (value) => (this.config = { ...this.config, minReportTokens: value })),
+				},
+				{
+					label: `acceptanceRatio: ${this.config.acceptanceRatio}`,
+					run: () =>
+						this.pickNumber(ui, "acceptanceRatio", this.config.acceptanceRatio, (value) =>
+							(this.config = { ...this.config, acceptanceRatio: value }),
+						),
+				},
+				{ label: "контейнер digests.md", run: () => this.editContainer(ui, DIGESTS_CONTAINER) },
+				{ label: "контейнер reports.md", run: () => this.editContainer(ui, REPORTS_CONTAINER) },
+				{ label: "контейнер replies.md", run: () => this.editContainer(ui, REPLIES_CONTAINER) },
+				{ label: "дамп конспектов", run: () => this.dump() },
+			];
+			const choice = await ui.select(`session-tidy · ${this.statusText() ?? "off"}`, rows.map((row) => row.label));
+			if (choice === undefined) return;
+			const row = rows.find((item) => item.label === choice);
+			await row?.run();
+		}
+	}
+
+	private async pickModel(ui: ExtensionContext["ui"]): Promise<void> {
+		const models = this.registry?.getAvailable() ?? [];
+		const none = "модель сессии";
+		const choice = await ui.select(
+			"модель-редактор",
+			[none, ...models.map((model) => `${model.provider}/${model.id}`)],
+		);
+		if (choice === undefined) return;
+		this.config = { ...this.config, model: choice === none ? undefined : choice };
+		this.persistConfig();
+	}
+
+	private async pickThinking(ui: ExtensionContext["ui"]): Promise<void> {
+		const levels = ["нет", "minimal", "low", "medium", "high", "xhigh", "max"];
+		const choice = await ui.select("thinking level модели-редактора", levels);
+		if (choice === undefined) return;
+		this.config = { ...this.config, thinking: choice === "нет" ? undefined : choice };
+		this.persistConfig();
+	}
+
+	private async pickCount(
+		ui: ExtensionContext["ui"],
+		name: string,
+		current: number,
+		apply: (value: number) => void,
+	): Promise<void> {
+		await this.pickNumber(ui, name, current, apply, (value) => Number.isInteger(value) && value >= 0);
+	}
+
+	private async pickNumber(
+		ui: ExtensionContext["ui"],
+		name: string,
+		current: number,
+		apply: (value: number) => void,
+		valid: (value: number) => boolean = (value) => value > 0 && value <= 1,
+	): Promise<void> {
+		const answer = await ui.input(`${name}: число`, String(current));
+		if (answer === undefined) return;
+		const value = Number(answer.trim());
+		if (!Number.isFinite(value) || !valid(value)) {
+			this.notify(`session-tidy: ${name} = ${answer} не подходит, значение сохранено`, "warning");
+			return;
+		}
+		apply(value);
+		this.persistConfig();
+	}
+
+	private async editContainer(ui: ExtensionContext["ui"], name: string): Promise<void> {
+		const path = containerPath(name);
+		const text = await ui.editor(`${name}.md`, readFileSync(path, "utf8"));
+		if (text === undefined) return;
+		writeFileSync(path, text.endsWith("\n") ? text : `${text}\n`);
+		const fallback =
+			name === DIGESTS_CONTAINER ? DEFAULT_DIGEST_TASK : name === REPORTS_CONTAINER ? DEFAULT_REPORT_TASK : DEFAULT_REPLY_TASK;
+		const loaded = loadContainer(name, fallback);
+		if (name === DIGESTS_CONTAINER) this.digestsContainer = loaded.container;
+		else if (name === REPORTS_CONTAINER) this.reportsContainer = loaded.container;
+		else this.repliesContainer = loaded.container;
+		this.notify(`session-tidy: ${name}.md сохранён`, "info");
+	}
+
+	private async editContainer(ui: ExtensionContext["ui"], name: string): Promise<void> {
+		const path = containerPath(name);
+		const text = await ui.editor(`${name}.md`, readFileSync(path, "utf8"));
+		if (text === undefined) return;
+		writeFileSync(path, text.endsWith("\n") ? text : `${text}\n`);
+		const loaded = loadContainer(name, name === DIGESTS_CONTAINER ? DEFAULT_DIGEST_TASK : DEFAULT_REPORT_TASK);
+		if (name === DIGESTS_CONTAINER) (this as { digestsContainer: Container }).digestsContainer = loaded.container;
+		else if (name === REPORTS_CONTAINER) (this as { reportsContainer: Container }).reportsContainer = loaded.container;
+		else (this as { repliesContainer: Container }).repliesContainer = loaded.container;
+		this.notify(`session-tidy: ${name}.md сохранён`, "info");
+	}
+
+	private persistConfig(): void {
+		writeFileSync(configPath(), `${JSON.stringify(this.config, null, 2)}\n`);
+		this.updateStatus();
 	}
 
 	private capture(ctx: ExtensionContext): void {
