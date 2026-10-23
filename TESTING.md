@@ -135,6 +135,12 @@ report and shows the clear wording after it, below a separator; with `off` the
 text switches to the clear wording. The switch applies at render — moving the
 viewport or sending a message redraws the transcript.
 
+Reply rewriting. Send a reply with caps lock and profanity. After the run
+settles the session JSONL gains a `session-tidy-reply-applied` entry, the
+transcript keeps the raw reply and shows the rewritten one right after it — a
+block starting with `rewritten`. The rewrite extracts the demand: the force
+survives as content, the noise does not.
+
 Loud defaults. With no settings file and no container the session start
 announces their creation, and the files on disk hold the defaults. A `k` of
 `-3` or a model of `7` warns by name and falls back to the default.
