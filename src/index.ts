@@ -1,9 +1,13 @@
 /**
- * compact-thinking — densify old thinking blocks.
+ * session-tidy — улучшение сессии: конспекты рассуждений и внятность докладов.
  *
- * The model keeps raw thinking for its last K actions; older blocks reach it
- * as short digests. A digest is made by a background call of the same model
- * over the same session prefix, so the provider reads it from the warm cache.
+ * Описание — README.md, сценарии проверки — TESTING.md, чистые правила —
+ * probe.mjs.
+ *
+ * Первый способ улучшения: модель видит сырое мышление последних K действий,
+ * более старые блоки доходят до неё короткими конспектами. Конспект делает
+ * фоновый вызов той же модели по тому же префиксу сессии, поэтому провайдер
+ * читает его из горячего кеша.
  *
  * Digests are substituted into the context on the fly by one function:
  * - in `context`, before the main model request;
@@ -14,9 +18,6 @@
  * while the state lives in extension entries. Pi therefore derives the context
  * size and the compaction threshold from the real `usage`, not from a rough
  * character estimate.
- *
- * Task notes: `~/.pi/agent/.task/current/19_compact-thinking/`. Extension
- * description — README.md, test scenarios — TESTING.md, pure rules — probe.mjs.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -53,14 +54,14 @@ import {
 type AgentMessage = ContextEvent["messages"][number];
 type AssistantContent = Extract<AgentMessage, { role: "assistant" }>["content"];
 
-const STATUS_KEY = "compact-thinking";
+const STATUS_KEY = "session-tidy";
 /** Extension entry: the digest is substituted into the context. */
-const APPLIED_ENTRY = "compact-thinking-applied";
-/** Entries of the former extension name: read so old sessions keep their digests. */
-const LEGACY_APPLIED_ENTRIES = ["hybrid-thinking-applied"];
+const APPLIED_ENTRY = "session-tidy-applied";
+/** Entries of former extension names: read so old sessions keep their digests. */
+const LEGACY_APPLIED_ENTRIES = ["hybrid-thinking-applied", "compact-thinking-applied"];
 /** Extension entry: the digest was rejected and is not retried. */
-const REJECTED_ENTRY = "compact-thinking-rejected";
-const LEGACY_REJECTED_ENTRIES = ["hybrid-thinking-rejected"];
+const REJECTED_ENTRY = "session-tidy-rejected";
+const LEGACY_REJECTED_ENTRIES = ["hybrid-thinking-rejected", "compact-thinking-rejected"];
 /** How many transient failures one block survives per session. */
 const MAX_ATTEMPTS = 3;
 /** Status spinner frames: they take the place of the space while the job runs. */
@@ -128,19 +129,25 @@ function asRejectedRecord(data: unknown): RejectedRecord | undefined {
 }
 
 function configPath(): string {
+	return join(getAgentDir(), "session-tidy.json");
+}
+
+/** Config of the former extension name: read so old setups keep working. */
+function legacyConfigPath(): string {
 	return join(getAgentDir(), "compact-thinking.json");
 }
 
 function loadConfig(): { config: Config; problem?: string } {
-	try {
-		return { config: parseConfig(JSON.parse(readFileSync(configPath(), "utf8"))) };
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-			return { config: DEFAULT_CONFIG };
+	for (const path of [configPath(), legacyConfigPath()]) {
+		try {
+			return { config: parseConfig(JSON.parse(readFileSync(path, "utf8"))) };
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+			const message = error instanceof Error ? error.message : String(error);
+			return { config: DEFAULT_CONFIG, problem: `${path}: ${message}` };
 		}
-		const message = error instanceof Error ? error.message : String(error);
-		return { config: DEFAULT_CONFIG, problem: `config.json: ${message}` };
 	}
+	return { config: DEFAULT_CONFIG };
 }
 
 function buildRequestText(blockText: string): string {
@@ -150,7 +157,7 @@ function buildRequestText(blockText: string): string {
 /** Estimated like Pi does: four characters per token. */
 const estimate = (text: string): number => Math.ceil(text.length / 4);
 
-class HybridThinking {
+class SessionTidy {
 	private readonly pi: ExtensionAPI;
 	private readonly config: Config;
 	private readonly configProblem: string | undefined;
@@ -203,8 +210,8 @@ class HybridThinking {
 		pi.on("turn_end", (_event, ctx) => this.onTurnEnd(ctx));
 		pi.on("agent_before_settle", (_event, ctx) => this.onAgentBeforeSettle(ctx));
 		pi.on("session_shutdown", () => this.stop());
-		pi.registerCommand("compact-thinking", {
-			description: "Densify old thinking blocks: report, on, off, dump",
+		pi.registerCommand("session-tidy", {
+			description: "Tidy the session: report, on, off, dump",
 			handler: async (args, ctx) => this.onCommand(args, ctx),
 		});
 	}
@@ -215,7 +222,7 @@ class HybridThinking {
 		this.systemOptions = undefined;
 		this.enabled = this.config.enabled;
 		this.rebuild();
-		if (this.configProblem) this.warn(`compact-thinking: ${this.configProblem}`);
+		if (this.configProblem) this.warn(`session-tidy: ${this.configProblem}`);
 		this.updateStatus();
 	}
 
@@ -271,7 +278,7 @@ class HybridThinking {
 		if (command === "on" || command === "off") {
 			this.enabled = command === "on";
 			this.updateStatus();
-			this.notify(`compact-thinking: ${this.enabled ? "on" : "off"}`, "info");
+			this.notify(`session-tidy: ${this.enabled ? "on" : "off"}`, "info");
 			if (this.enabled) setTimeout(() => void this.pump(), 0);
 			return;
 		}
@@ -514,7 +521,7 @@ class HybridThinking {
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.warn(`compact-thinking: ${message}`);
+			this.warn(`session-tidy: ${message}`);
 		} finally {
 			this.running = false;
 			this.stopSpinner();
@@ -546,7 +553,7 @@ class HybridThinking {
 		if (!manager) return;
 		const sessionFile = manager.getSessionFile();
 		if (!sessionFile) {
-			this.notify("compact-thinking: the session is not persisted, nowhere to write", "warning");
+			this.notify("session-tidy: the session is not persisted, nowhere to write", "warning");
 			return;
 		}
 		const raw: string[] = [];
@@ -568,7 +575,7 @@ class HybridThinking {
 		const dir = dirname(sessionFile);
 		writeFileSync(join(dir, "thinking-a"), `${raw.join("\n\n")}\n`);
 		writeFileSync(join(dir, "thinking-b"), `${substituted.join("\n\n")}\n`);
-		this.notify(`compact-thinking: ${raw.length} digests in ${dir}`, "info");
+		this.notify(`session-tidy: ${raw.length} digests in ${dir}`, "info");
 	}
 
 	private persist(customType: string, data: unknown): void {
@@ -593,10 +600,10 @@ class HybridThinking {
 		);
 	}
 
-	/** Detailed report for `/compact-thinking` without arguments. */
+	/** Detailed report for `/session-tidy` without arguments. */
 	private reportText(): string {
 		return (
-			`compact-thinking: ${this.enabled ? "on" : "off"} · ` +
+			`session-tidy: ${this.enabled ? "on" : "off"} · ` +
 			`digests in ${this.substitutions.size} messages · ` +
 			`saved ${formatTokens(this.savedThinkingTokens)} tokens · ` +
 			`generated ${formatTokens(this.spentOutput)} tokens · ` +
@@ -654,6 +661,6 @@ class HybridThinking {
 	}
 }
 
-export default function compactThinking(pi: ExtensionAPI): void {
-	new HybridThinking(pi);
+export default function sessionTidy(pi: ExtensionAPI): void {
+	new SessionTidy(pi);
 }

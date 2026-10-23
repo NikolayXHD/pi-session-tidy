@@ -15,7 +15,9 @@ streams.
 
 ## Config
 
-The file is `~/.pi/agent/compact-thinking.json`. Fields: `enabled`, `k`,
+The file is `~/.pi/agent/session-tidy.json` (the former
+`~/.pi/agent/compact-thinking.json` is read when the new file is missing).
+Fields: `enabled`, `k`,
 `minTokens`, `acceptanceRatio`. A missing file equals the defaults; a broken
 field falls back to its default, and the extension warns once per session.
 
@@ -42,18 +44,18 @@ Rules live in probe.mjs. Session consequences:
 ## Manual session scenarios
 
 Run each scenario in an empty directory so the JSONL lands in its own place:
-`mkdir -p /tmp/compact-thinking-check` and run `pi -p "..."` inside it.
+`mkdir -p /tmp/session-tidy-check` and run `pi -p "..."` inside it.
 
 Status. At start the footer shows `💭 -…k/…k +…k`: savings, raw reasoning sum
 and generation of the background calls. While the background call runs, a
 spinner follows the balloon; while the mode is off the footer shows nothing.
-`/compact-thinking` prints a detailed report, `off`/`on` toggle. Sums are
+`/session-tidy` prints a detailed report, `off`/`on` toggle. Sums are
 recomputed at every turn boundary, so in a running session with reasoning the
 second number must not stay zero.
 
 Compaction during a task. With `k = 0` and `minTokens` around 16 ask the agent
 to run several bash commands in a row. After the second answer the session
-JSONL contains `compact-thinking-applied` entries; the extension writes no
+JSONL contains `session-tidy-applied` entries; the extension writes no
 `context_edit` entries at all; the assistant message entry keeps the full raw
 thinking.
 
@@ -66,7 +68,7 @@ The summarizer sees digests. A temporary logger extension on
 `session_before_compact` writes thinking block lengths from
 `preparation.messagesToSummarize`; those must be digests, not raw text.
 
-Context change. After a digest is applied, `/compact-thinking` shows non-zero
+Context change. After a digest is applied, `/session-tidy` shows non-zero
 digests and savings, while the raw text stays in the message entry.
 
 Tree navigation. Make several turns, then `/tree` to an earlier entry. The
@@ -74,17 +76,17 @@ state is rebuilt for the new branch: the status counts only its entries, and
 digests from the abandoned branch do not enter the context.
 
 Foreign edit. If a block's visible text was replaced by a foreign
-`context_edit`, the extension leaves it alone and no `compact-thinking-applied`
+`context_edit`, the extension leaves it alone and no `session-tidy-applied`
 entry appears for it.
 
 Resume. Interrupt a session and resume it. Digests are restored from
-`compact-thinking-applied` entries and substituted into the context again; the
+`session-tidy-applied` entries and substituted into the context again; the
 status matches the number of active entries.
 
-Disable. With `/compact-thinking off` no new extension entries appear and the
+Disable. With `/session-tidy off` no new extension entries appear and the
 footer shows nothing until the mode is enabled again.
 
-Dump. After several compactions `/compact-thinking dump` writes `thinking-a`
+Dump. After several compactions `/session-tidy dump` writes `thinking-a`
 and `thinking-b` next to the session JSONL; block headings match in both files,
 blocks follow session order, and `thinking-b` holds what the model sees. Diff
 recipes are in README, section Observability.
@@ -92,3 +94,8 @@ recipes are in README, section Observability.
 Provider signature. For DeepSeek and vLLM the digest keeps
 `thinkingSignature: "reasoning_content"`; for a provider without a
 reasoning-field signature it is dropped.
+
+Rename. A session written before the rename keeps its digests: entries
+`compact-thinking-applied` and `hybrid-thinking-applied` are read like
+`session-tidy-applied`. With only `compact-thinking.json` on disk the config is
+read from it.

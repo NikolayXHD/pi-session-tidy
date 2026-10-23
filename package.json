@@ -1,7 +1,7 @@
 {
-  "name": "pi-compact-thinking",
+  "name": "pi-session-tidy",
   "version": "1.0.0",
-  "description": "Pi extension: keep the last K reasoning blocks raw and replace older thinking with compact digests",
+  "description": "Pi extension: tidy the session — keep the last K reasoning blocks raw and replace older thinking with compact digests",
   "keywords": [
     "pi-package",
     "pi",

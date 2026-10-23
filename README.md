@@ -1,4 +1,4 @@
-# pi-compact-thinking
+# pi-session-tidy
 
 Pi extension that shrinks the thinking in the context.
 
@@ -15,13 +15,13 @@ Footer: `💭 -40k/120k +76k` — reasoning tokens saved, raw reasoning tokens i
 context, tokens spent by the background calls. Spinner while a rewrite runs.
 While the mode is off the footer shows nothing.
 
-- `/compact-thinking` — report;
-- `/compact-thinking on` / `off`;
-- `/compact-thinking dump` — raw and compacted blocks next to the session file.
+- `/session-tidy` — report;
+- `/session-tidy on` / `off`;
+- `/session-tidy dump` — raw and compacted blocks next to the session file.
 
 ## Observability
 
-`/compact-thinking dump` writes two files next to the session JSONL:
+`/session-tidy dump` writes two files next to the session JSONL:
 
 - `thinking-a` — the raw blocks as the model wrote them;
 - `thinking-b` — the same blocks as the model sees them, with digests in place.
@@ -54,10 +54,11 @@ the session JSONL under `~/.pi/agent/sessions/`.
 ## Install
 
 ```bash
-pi install git:github.com/NikolayXHD/pi-compact-thinking
+pi install git:github.com/NikolayXHD/pi-session-tidy
 ```
 
-Settings: `~/.pi/agent/compact-thinking.json`.
+Settings: `~/.pi/agent/session-tidy.json`. The former
+`~/.pi/agent/compact-thinking.json` is read when the new file is missing.
 
 | field             | default | meaning                       |
 | ----------------- | ------- | ----------------------------- |
@@ -88,4 +89,4 @@ session settles; it never competes with the model stream.
 
 ## Development
 
-`node src/probe.mjs` for pure rules, `src/TESTING.md` for session scenarios.
+`node src/probe.mjs` for pure rules, `TESTING.md` for session scenarios.

@@ -1,5 +1,5 @@
 /**
- * compact-thinking — pure rules for compacting old thinking blocks.
+ * session-tidy — pure rules for compacting old thinking blocks.
  *
  * The module is pure: no files, no Pi events. Everything runtime-bound lives
  * in index.ts. Test scenarios — TESTING.md, direct run — probe.mjs.
