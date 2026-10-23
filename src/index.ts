@@ -528,7 +528,16 @@ class SessionTidy {
 
 	private transformMarkdown(markdown: string, context: MarkdownTransformContext): string {
 		if (context.messageType !== "assistant") return markdown;
-		const rewritten = this.rewriteByRaw.get(normalizeText(markdown));
+		const key = normalizeText(markdown);
+		const rewritten = this.rewriteByRaw.get(key);
+		try {
+			writeFileSync(
+				"/tmp/session-tidy-transform.log",
+				`${JSON.stringify({ hit: rewritten !== undefined, key: key.slice(0, 60), keys: [...this.rewriteByRaw.keys()].map((item) => item.slice(0, 40)) })}\n`,
+			);
+		} catch {
+			// Debug log only.
+		}
 		if (rewritten === undefined) return markdown;
 		if (this.debug) return `${markdown}\n\n---\n\n${rewritten}`;
 		return rewritten;
