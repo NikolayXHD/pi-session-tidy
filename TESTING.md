@@ -63,9 +63,17 @@ Status. At start the footer shows `💭 -…k/…k +…k`: savings, raw reasonin
 and generation of the background calls; after the first rewrite a report
 counter follows (`✍ 1`). While the background call runs, a
 spinner follows the balloon; while the mode is off the footer shows nothing.
-`/session-tidy` prints a detailed report, `off`/`on` toggle. Sums are
+`/session-tidy` opens the settings menu — see the menu scenario below — and
+prints a detailed report with arguments; `off`/`on` toggle. Sums are
 recomputed at every turn boundary, so in a running session with reasoning the
 second number must not stay zero.
+
+Settings menu. `/session-tidy` without arguments opens the menu with the state
+in the title and current values in the rows. Enter on a row changes the value
+and the menu stays open. The mode and report display rows change the running
+session only; the model, thinking level and number rows write the config file —
+after changing `k` the file holds the new value. Container rows open the text
+in the editor and save it on close.
 
 Compaction during a task. With `k = 0` and `minTokens` around 16 ask the agent
 to run several bash commands in a row. After the second answer the session
