@@ -69,6 +69,11 @@ Substitution reaches the provider. A temporary logger extension on
 `reasoning_content` for assistant messages; in the log a raw block turns into a
 digest and stays that way in later requests.
 
+Editor context. Every background call carries the results of earlier
+transformations: with two digests applied, the request of the third call shows
+those digests where the raw blocks were. The same logger sees the background
+requests too — `before_provider_request` fires for them.
+
 The summarizer sees digests. A temporary logger extension on
 `session_before_compact` writes thinking block lengths from
 `preparation.messagesToSummarize`; those must be digests, not raw text.

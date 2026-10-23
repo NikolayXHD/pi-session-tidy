@@ -460,8 +460,10 @@ class SessionTidy {
 	}
 
 	/**
-	 * The compaction call uses the same prefix as the main session. With a forced
-	 * system prompt Pi collapses system messages into one head — mirrored here.
+	 * The background call uses the same prefix the main session sends: applied
+	 * digests stand where they were substituted, so the provider cache is shared
+	 * and later calls build on earlier results. With a forced system prompt Pi
+	 * collapses system messages into one head — mirrored here.
 	 */
 	private async compact(candidate: Candidate): Promise<void> {
 		const manager = this.manager;
@@ -471,7 +473,7 @@ class SessionTidy {
 		if (!manager || !registry || !model) return;
 		const generation = this.generation;
 		const projection = manager.buildSessionProjection();
-		const messages = convertToLlm(projection.messages);
+		const messages = convertToLlm(this.substituteMessages(projection.messages) ?? projection.messages);
 		const tools = getCurrentTools(messages);
 		const prefix: Message[] =
 			this.systemOptions?.forceSystemPrompt !== undefined
