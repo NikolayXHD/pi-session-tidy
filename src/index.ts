@@ -420,6 +420,7 @@ class SessionTidy {
 	}
 
 	private onAgentBeforeSettle(ctx: ExtensionContext): void {
+		writeFileSync("/tmp/session-tidy-pick.log", "settle\n");
 		this.capture(ctx);
 		this.refreshThinkingTokens();
 		this.updateStatus();
@@ -598,6 +599,7 @@ class SessionTidy {
 	 */
 	/** The oldest work item: a digest or a report, in session order. */
 	private pickWork(): WorkItem | undefined {
+		writeFileSync("/tmp/session-tidy-pick.log", "pick\n");
 		const manager = this.manager;
 		if (!manager) return undefined;
 		const projection = manager.buildSessionProjection();
@@ -827,6 +829,7 @@ class SessionTidy {
 
 	/** One background job: walk the candidates while there are any. */
 	private async pump(): Promise<void> {
+		writeFileSync("/tmp/session-tidy-pick.log", `pump ${this.running} ${this.enabled}\n`);
 		if (this.running || !this.enabled) return;
 		const generation = this.generation;
 		this.running = true;
