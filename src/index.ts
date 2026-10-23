@@ -22,7 +22,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getCurrentTools, type Message, type SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { Container, Text } from "@earendil-works/pi-tui";
+import { Container as TuiContainer, Text } from "@earendil-works/pi-tui";
 import {
 	convertToLlm,
 	getAgentDir,
@@ -564,7 +564,7 @@ class SessionTidy {
 	private renderReply(data: unknown) {
 		const record = asRewriteRecord(data);
 		if (!record) return undefined;
-		const block = new Container();
+		const block = new TuiContainer();
 		block.addChild(new Text("rewritten", 1, 0));
 		for (const line of record.rewrittenText.split("\n")) block.addChild(new Text(line, 2, 0));
 		return block;
