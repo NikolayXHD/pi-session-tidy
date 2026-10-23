@@ -8,17 +8,18 @@ import {
 	keepsSignature,
 	selectCandidates,
 	buildReplacement,
-	buildReportReplacement,
+	buildTextReplacement,
 	foreignChangedBlocks,
 	foreignChangedText,
 	orderWork,
+	selectReplies,
 	messageText,
 	normalizeText,
 	selectReports,
 	extractTagged,
 	findToolProtocolMarker,
 	validateCompaction,
-	validateReport,
+	validateRewrite,
 	formatTokens,
 	formatStatusText,
 } from "./logic.ts";
@@ -333,33 +334,57 @@ expectEqual(
 );
 
 const mixedWork = orderWork(
-	[{ entryId: "m", api: "anthropic-messages", content: [thinkingBlock(longReasoning), textBlock(reportText)] }],
+	[{ entryId: "m", role: "assistant" }],
 	[{ entryId: "m", blockIndex: 0, text: longReasoning, tokens: 100 }],
 	[{ entryId: "m", text: reportText, tokens: 100 }],
+	[],
 );
 expectEqual("one queue keeps session order, a digest before the report of its message", mixedWork.map((item) => item.kind), ["digest", "report"]);
 expectEqual(
 	"the queue goes by message order",
-	orderWork(reportAssistants, [{ entryId: "r3", blockIndex: 0, text: "t", tokens: 1 }], [{ entryId: "r1", text: reportText, tokens: 100 }]).map(
-		(item) => (item.kind === "digest" ? item.candidate.entryId : item.report.entryId),
-	),
+	orderWork(
+		reportAssistants.map((assistant) => ({ entryId: assistant.entryId, role: "assistant" })),
+		[{ entryId: "r3", blockIndex: 0, text: "t", tokens: 1 }],
+		[{ entryId: "r1", text: reportText, tokens: 100 }],
+		[],
+	).map((item) => (item.kind === "digest" ? item.candidate.entryId : item.report.entryId)),
 	["r1", "r3"],
 );
+expectEqual(
+	"a reply goes before the work of its turn",
+	orderWork(
+		[{ entryId: "u1", role: "user" }, { entryId: "m", role: "assistant" }],
+		[{ entryId: "m", blockIndex: 0, text: "t", tokens: 1 }],
+		[],
+		[{ entryId: "u1", text: "hi", tokens: 1 }],
+	).map((item) => item.kind),
+	["reply", "digest"],
+);
+
+const replyMessages = [
+	{ entryId: "u1", content: [textBlock("БЛЯДЬ ОБЪЯСНИ ПОДРОБНЕЕ")] },
+	{ entryId: "u2", content: [thinkingBlock("hmm")] },
+	{ entryId: "u3", content: [textBlock("ok")] },
+];
+const replyKeys = (list) => list.map((reply) => reply.entryId);
+expectEqual("every text reply is selected, short ones too", replyKeys(selectReplies(replyMessages, new Set(), estimateText)), ["u1", "u3"]);
+expectEqual("processed replies are skipped", replyKeys(selectReplies(replyMessages, new Set(["u1"]), estimateText)), ["u3"]);
+expectEqual("a reply without text is skipped", replyKeys(selectReplies([{ entryId: "u", content: [thinkingBlock("hmm")] }], new Set(), estimateText)), []);
 
 expectEqual(
 	"the rewrite takes the place of the report text",
-	buildReportReplacement([thinkingBlock("thought"), textBlock("raw report"), textBlock("tail")], "clear report"),
+	buildTextReplacement([thinkingBlock("thought"), textBlock("raw report"), textBlock("tail")], "clear report"),
 	[thinkingBlock("thought"), textBlock("clear report")],
 );
-expectEqual("a message without text keeps its blocks", buildReportReplacement([thinkingBlock("thought")], "clear report"), [thinkingBlock("thought")]);
+expectEqual("a message without text keeps its blocks", buildTextReplacement([thinkingBlock("thought")], "clear report"), [thinkingBlock("thought")]);
 
-const acceptedRewrite = validateReport(attemptResult("stop", [textBlock(`<rewrite>${repeatChar("x", 800)}</rewrite>`)]), estimateText);
+const acceptedRewrite = validateRewrite(attemptResult("stop", [textBlock(`<rewrite>${repeatChar("x", 800)}</rewrite>`)]), estimateText);
 expectEqual("a long rewrite is accepted", acceptedRewrite.ok, true);
-expectEqual("a rewrite of any length is accepted", validateReport(attemptResult("stop", [textBlock("<rewrite>short</rewrite>")]), estimateText).ok, true);
-expectEqual("a rewrite without the wrapper is rejected", validateReport(attemptResult("stop", [textBlock("plain answer")]), estimateText).terminal, true);
-expectEqual("an empty rewrite is rejected", validateReport(attemptResult("stop", [textBlock("<rewrite>   </rewrite>")]), estimateText).ok, false);
-expectEqual("tool markup in the rewrite is rejected", validateReport(attemptResult("stop", [textBlock("<rewrite><tool_calls></rewrite>")]), estimateText).ok, false);
-expectEqual("an aborted rewrite is not terminal", validateReport(attemptResult("aborted", []), estimateText).terminal, false);
+expectEqual("a rewrite of any length is accepted", validateRewrite(attemptResult("stop", [textBlock("<rewrite>short</rewrite>")]), estimateText).ok, true);
+expectEqual("a rewrite without the wrapper is rejected", validateRewrite(attemptResult("stop", [textBlock("plain answer")]), estimateText).terminal, true);
+expectEqual("an empty rewrite is rejected", validateRewrite(attemptResult("stop", [textBlock("<rewrite>   </rewrite>")]), estimateText).ok, false);
+expectEqual("tool markup in the rewrite is rejected", validateRewrite(attemptResult("stop", [textBlock("<rewrite><tool_calls></rewrite>")]), estimateText).ok, false);
+expectEqual("an aborted rewrite is not terminal", validateRewrite(attemptResult("aborted", []), estimateText).terminal, false);
 
 expectEqual("a foreign text edit is detected", foreignChangedText([textBlock("raw")], [textBlock("changed")]), true);
 expectEqual("unchanged text is not foreign", foreignChangedText([textBlock("raw")], [textBlock("raw")]), false);
@@ -369,12 +394,12 @@ expectEqual("message text joins the text blocks", messageText([thinkingBlock("th
 expectEqual("normalization collapses whitespace", normalizeText(" a\n\n b "), "a b");
 expectEqual(
 	"the status shows the rewritten reports counter",
-	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 100, contextThinkingTokens: 100, generatedTokens: 0, rewrittenReports: 3 }),
+	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 100, contextThinkingTokens: 100, generatedTokens: 0, rewrittenTexts: 3 }),
 	"💭 0/100 +0 ✍ 3",
 );
 expectEqual(
 	"without rewrites the counter is absent",
-	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 100, contextThinkingTokens: 100, generatedTokens: 0, rewrittenReports: 0 }),
+	formatStatusText({ enabled: true, running: false, rawThinkingTokens: 100, contextThinkingTokens: 100, generatedTokens: 0, rewrittenTexts: 0 }),
 	"💭 0/100 +0",
 );
 

@@ -22,6 +22,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getCurrentTools, type Message, type SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { Container, Text } from "@earendil-works/pi-tui";
 import {
 	convertToLlm,
 	getAgentDir,
@@ -39,7 +40,7 @@ import {
 	DEFAULT_CONFIG,
 	blockKey,
 	buildReplacement,
-	buildReportReplacement,
+	buildTextReplacement,
 	foreignChangedBlocks,
 	foreignChangedText,
 	formatStatusText,
@@ -54,10 +55,12 @@ import {
 	selectCandidates,
 	selectReports,
 	validateCompaction,
-	validateReport,
+	validateRewrite,
 	type Candidate,
 	type Config,
 	type Container,
+	type ContentBlock,
+	type MessageSlot,
 	type ReportCandidate,
 	type VisibleAssistant,
 	type WorkItem,
@@ -78,6 +81,9 @@ const LEGACY_REJECTED_ENTRIES = ["hybrid-thinking-rejected", "compact-thinking-r
 const REPORT_ENTRY = "session-tidy-report-applied";
 /** Extension entry: the rewrite was rejected and is not retried. */
 const REJECTED_REPORT_ENTRY = "session-tidy-report-rejected";
+/** Extension entry: the rewritten reply is substituted into the context and shown. */
+const REPLY_ENTRY = "session-tidy-reply-applied";
+const REJECTED_REPLY_ENTRY = "session-tidy-reply-rejected";
 /** How many transient failures one block survives per session. */
 const MAX_ATTEMPTS = 3;
 /** Status spinner frames: they take the place of the space while the job runs. */
@@ -87,6 +93,7 @@ const SPINNER_INTERVAL_MS = 100;
 const CONTAINER_DIR = "session-tidy";
 const DIGESTS_CONTAINER = "digests";
 const REPORTS_CONTAINER = "reports";
+const REPLIES_CONTAINER = "replies";
 
 const DEFAULT_DIGEST_TASK = [
 	"You are a compression tool, not the assistant in the transcript above.",
@@ -111,6 +118,19 @@ const DEFAULT_REPORT_TASK = [
 	"Wrap the result in <rewrite> and </rewrite> tags.",
 ].join("\n");
 
+const DEFAULT_REPLY_TASK = [
+	"You are an editing tool, not the assistant in the transcript above.",
+	"",
+	"The message quoted below is what the human typed in the heat of the moment:",
+	"caps lock, profanity, fragments. Extract what it carries — the demand, the",
+	"correction, the priority, the reason for the anger — and rewrite it as a",
+	"calm, clear message in the same language. The force survives as content, not",
+	"as noise: keep every fact and intent. Never describe the message, restate",
+	"it.",
+	"",
+	"Wrap the result in <rewrite> and </rewrite> tags.",
+].join("\n");
+
 interface AppliedRecord {
 	targetEntryId: string;
 	blockIndex: number;
@@ -129,7 +149,7 @@ interface RejectedRecord {
 	spentOutput: number;
 }
 
-interface ReportRecord {
+interface RewriteRecord {
 	targetEntryId: string;
 	rawTokens: number;
 	rewrittenTokens: number;
@@ -138,7 +158,7 @@ interface ReportRecord {
 	spentOutput: number;
 }
 
-interface RejectedReportRecord {
+interface RejectedRewriteRecord {
 	targetEntryId: string;
 	reason: string;
 	spentTokens: number;
@@ -176,7 +196,7 @@ function asRejectedRecord(data: unknown): RejectedRecord | undefined {
 	};
 }
 
-function asReportRecord(data: unknown): ReportRecord | undefined {
+function asRewriteRecord(data: unknown): RewriteRecord | undefined {
 	if (!isRecord(data)) return undefined;
 	if (typeof data.targetEntryId !== "string" || typeof data.rewrittenText !== "string") return undefined;
 	return {
@@ -189,7 +209,7 @@ function asReportRecord(data: unknown): ReportRecord | undefined {
 	};
 }
 
-function asRejectedReportRecord(data: unknown): RejectedReportRecord | undefined {
+function asRejectedRewriteRecord(data: unknown): RejectedRewriteRecord | undefined {
 	if (!isRecord(data)) return undefined;
 	if (typeof data.targetEntryId !== "string") return undefined;
 	return {
@@ -270,11 +290,12 @@ class SessionTidy {
 	private readonly created: string[];
 	private readonly digestsContainer: Container;
 	private readonly reportsContainer: Container;
+	private readonly repliesContainer: Container;
 	private readonly announced = new Set<string>();
 	private readonly appliedRecords = new Map<string, AppliedRecord>();
 	private readonly rejected = new Map<string, string>();
-	private readonly reportRecords = new Map<string, ReportRecord>();
-	private readonly reportRejected = new Map<string, string>();
+	private readonly rewrites = new Map<string, RewriteRecord>();
+	private readonly rewriteRejected = new Map<string, string>();
 	/** Rewritten report text by the normalized raw text: the render lookup. */
 	private readonly rewriteByRaw = new Map<string, string>();
 	private readonly attempts = new Map<string, number>();
@@ -298,6 +319,7 @@ class SessionTidy {
 	private debug: boolean;
 	private running = false;
 	private rewrittenReports = 0;
+	private rewrittenReplies = 0;
 	private activeDigests = 0;
 	private spinnerIndex = 0;
 	private spinner: ReturnType<typeof setInterval> | undefined;
@@ -318,8 +340,12 @@ class SessionTidy {
 		this.digestsContainer = digests.container;
 		const reports = loadContainer(REPORTS_CONTAINER, DEFAULT_REPORT_TASK);
 		this.reportsContainer = reports.container;
-		this.problems = [...loaded.problems, ...digests.problems, ...reports.problems];
-		this.created = [loaded.created, digests.created, reports.created].filter((path): path is string => path !== undefined);
+		const replies = loadContainer(REPLIES_CONTAINER, DEFAULT_REPLY_TASK);
+		this.repliesContainer = replies.container;
+		this.problems = [...loaded.problems, ...digests.problems, ...reports.problems, ...replies.problems];
+		this.created = [loaded.created, digests.created, reports.created, replies.created].filter(
+			(path): path is string => path !== undefined,
+		);
 		this.enabled = loaded.config.enabled;
 		this.debug = loaded.config.debug;
 
@@ -332,6 +358,7 @@ class SessionTidy {
 		pi.on("turn_end", (_event, ctx) => this.onTurnEnd(ctx));
 		pi.on("agent_before_settle", (_event, ctx) => this.onAgentBeforeSettle(ctx));
 		pi.on("session_shutdown", () => this.stop());
+		pi.registerEntryRenderer(REPLY_ENTRY, (entry) => this.renderReply(entry.data));
 		pi.registerMarkdownTransformer((markdown, context) => this.transformMarkdown(markdown, context));
 		pi.registerCommand("session-tidy", {
 			description: "Tidy the session: report, on, off, debug on|off, dump",
@@ -437,8 +464,8 @@ class SessionTidy {
 		if (!manager) return;
 		this.appliedRecords.clear();
 		this.rejected.clear();
-		this.reportRecords.clear();
-		this.reportRejected.clear();
+		this.rewrites.clear();
+		this.rewriteRejected.clear();
 		this.attempts.clear();
 		this.rejectedSpentTokens = 0;
 		this.rejectedSpentOutput = 0;
@@ -455,14 +482,14 @@ class SessionTidy {
 				this.rejected.set(blockKey(record.targetEntryId, record.blockIndex), record.reason);
 				this.rejectedSpentTokens += record.spentTokens;
 				this.rejectedSpentOutput += record.spentOutput;
-			} else if (entry.customType === REPORT_ENTRY) {
-				const record = asReportRecord(entry.data);
+			} else if (entry.customType === REPORT_ENTRY || entry.customType === REPLY_ENTRY) {
+				const record = asRewriteRecord(entry.data);
 				if (!record) continue;
-				this.reportRecords.set(record.targetEntryId, record);
-			} else if (entry.customType === REJECTED_REPORT_ENTRY) {
-				const record = asRejectedReportRecord(entry.data);
+				this.rewrites.set(record.targetEntryId, record);
+			} else if (entry.customType === REJECTED_REPORT_ENTRY || entry.customType === REJECTED_REPLY_ENTRY) {
+				const record = asRejectedRewriteRecord(entry.data);
 				if (!record) continue;
-				this.reportRejected.set(record.targetEntryId, record.reason);
+				this.rewriteRejected.set(record.targetEntryId, record.reason);
 				this.rejectedSpentTokens += record.spentTokens;
 				this.rejectedSpentOutput += record.spentOutput;
 			}
@@ -480,6 +507,7 @@ class SessionTidy {
 		this.rewriteByRaw.clear();
 		this.savedThinkingTokens = 0;
 		this.rewrittenReports = 0;
+		this.rewrittenReplies = 0;
 		this.activeDigests = 0;
 		this.spentTokens = this.rejectedSpentTokens;
 		this.spentOutput = this.rejectedSpentOutput;
@@ -493,11 +521,11 @@ class SessionTidy {
 			group.push(record);
 			digestsByTarget.set(record.targetEntryId, group);
 		}
-		const targets = new Set<string>([...digestsByTarget.keys(), ...this.reportRecords.keys()]);
+		const targets = new Set<string>([...digestsByTarget.keys(), ...this.rewrites.keys()]);
 		for (const targetId of targets) {
 			if (!inContext.has(targetId)) continue;
 			const entry = manager.getEntry(targetId);
-			if (entry?.type !== "message" || entry.message.role !== "assistant") continue;
+			if (entry?.type !== "message") continue;
 			const ordered = [...(digestsByTarget.get(targetId) ?? [])].sort((left, right) => left.blockIndex - right.blockIndex);
 			let content = entry.message.content;
 			for (const record of ordered) {
@@ -514,11 +542,13 @@ class SessionTidy {
 				this.spentTokens += record.spentTokens;
 				this.spentOutput += record.spentOutput;
 			}
-			const report = this.reportRecords.get(targetId);
+			const report = this.rewrites.get(targetId);
 			if (report) {
-				this.rewriteByRaw.set(normalizeText(messageText(entry.message.content)), report.rewrittenText);
-				content = buildReportReplacement(content, report.rewrittenText);
-				this.rewrittenReports += 1;
+				const role = entry.message.role === "user" ? "user" : "assistant";
+				this.rewriteByRaw.set(`${role}:${normalizeText(messageText(entry.message.content))}`, report.rewrittenText);
+				content = buildTextReplacement(content, report.rewrittenText);
+				if (entry.message.role === "user") this.rewrittenReplies += 1;
+				else this.rewrittenReports += 1;
 				this.spentTokens += report.spentTokens;
 				this.spentOutput += report.spentOutput;
 			}
@@ -527,11 +557,25 @@ class SessionTidy {
 		this.rawThinkingTokens = this.measureRawThinking(projection);
 	}
 
+	/**
+	 * The rewritten reply stands as its own block right after the human message:
+	 * both texts stay visible — the raw one above, the clear one here.
+	 */
+	private renderReply(data: unknown) {
+		const record = asRewriteRecord(data);
+		if (!record) return undefined;
+		const block = new Container();
+		block.addChild(new Text("rewritten", 1, 0));
+		for (const line of record.rewrittenText.split("\n")) block.addChild(new Text(line, 2, 0));
+		return block;
+	}
+
 	private transformMarkdown(markdown: string, context: MarkdownTransformContext): string {
-		if (context.messageType !== "assistant") return markdown;
-		const rewritten = this.rewriteByRaw.get(normalizeText(markdown));
+		if (context.messageType === "assistant-thinking") return markdown;
+		const role = context.messageType === "user" ? "user" : "assistant";
+		const rewritten = this.rewriteByRaw.get(`${role}:${normalizeText(markdown)}`);
 		if (rewritten === undefined) return markdown;
-		if (this.debug) return `${markdown}\n\n---\n\n${rewritten}`;
+		if (context.messageType === "user" || this.debug) return `${markdown}\n\n---\n\n${rewritten}`;
 		return rewritten;
 	}
 
@@ -540,7 +584,6 @@ class SessionTidy {
 		if (this.substitutions.size === 0) return undefined;
 		let changed = false;
 		const next = messages.map((message) => {
-			if (message.role !== "assistant") return message;
 			const content = this.substitutions.get(message.timestamp);
 			if (!content) return message;
 			changed = true;
@@ -558,77 +601,92 @@ class SessionTidy {
 		const manager = this.manager;
 		if (!manager) return undefined;
 		const projection = manager.buildSessionProjection();
+		const slots: MessageSlot[] = [];
 		const assistants: VisibleAssistant[] = [];
+		const replies: { entryId: string; content: readonly ContentBlock[] }[] = [];
 		const changed = new Set<string>();
 		const textChanged = new Set<string>();
 		for (const projected of projection.entries) {
 			const entry = projected.sourceEntry;
-			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+			if (entry.type !== "message") continue;
 			const visible = projected.messages[0];
-			if (!visible || visible.role !== "assistant" || !Array.isArray(visible.content)) continue;
+			if (!visible || !Array.isArray(visible.content)) continue;
 			const content = entry.message.content;
-			const foreign = foreignChangedBlocks(content, visible.content);
-			if (foreign.length > 0) {
-				content.forEach((block, index) => {
-					if (block.type === "thinking") changed.add(blockKey(entry.id, index));
-				});
+			if (entry.message.role === "assistant") {
+				if (visible.role !== "assistant") continue;
+				const foreign = foreignChangedBlocks(content, visible.content);
+				if (foreign.length > 0) {
+					content.forEach((block, index) => {
+						if (block.type === "thinking") changed.add(blockKey(entry.id, index));
+					});
+				}
+				if (foreignChangedText(content, visible.content)) textChanged.add(entry.id);
+				slots.push({ entryId: entry.id, role: "assistant" });
+				assistants.push({ entryId: entry.id, api: entry.message.api, content });
+			} else if (entry.message.role === "user") {
+				if (visible.role !== "user") continue;
+				if (foreignChangedText(content, visible.content)) textChanged.add(entry.id);
+				slots.push({ entryId: entry.id, role: "user" });
+				replies.push({ entryId: entry.id, content });
 			}
-			if (foreignChangedText(content, visible.content)) textChanged.add(entry.id);
-			assistants.push({ entryId: entry.id, api: entry.message.api, content });
 		}
 		const skipDigests = new Set<string>([...this.appliedRecords.keys(), ...this.rejected.keys(), ...changed]);
-		const skipReports = new Set<string>([...this.reportRecords.keys(), ...this.reportRejected.keys(), ...textChanged]);
+		const skipTexts = new Set<string>([...this.rewrites.keys(), ...this.rewriteRejected.keys(), ...textChanged]);
 		const digests = selectCandidates(assistants, skipDigests, this.config, estimate);
-		const reports = selectReports(assistants, skipReports, this.config.minReportTokens, estimate);
-		return orderWork(assistants, digests, reports)[0];
+		const reports = selectReports(assistants, skipTexts, this.config.minReportTokens, estimate);
+		const replyItems = selectReplies(replies, skipTexts, estimate);
+		return orderWork(slots, digests, reports, replyItems)[0];
 	}
 
 	/**
-	 * Rewrite a report clearer. The request repeats the session prefix, so the
-	 * editor sees the writing rules from the context. Length is no criterion:
-	 * reports are not compressed.
+	 * Rewrite a report or a reply clearer. The request repeats the session
+	 * prefix, so the editor sees the writing rules from the context. Length is no
+	 * criterion: rewritten texts are not compressed.
 	 */
-	private async rewrite(report: ReportCandidate): Promise<void> {
-		const container = this.reportsContainer;
+	private async rewriteText(item: { entryId: string; text: string; tokens: number }, kind: "report" | "reply"): Promise<void> {
+		const container = kind === "report" ? this.reportsContainer : this.repliesContainer;
+		const appliedType = kind === "report" ? REPORT_ENTRY : REPLY_ENTRY;
+		const rejectedType = kind === "report" ? REJECTED_REPORT_ENTRY : REJECTED_REPLY_ENTRY;
+		const quoteTag = kind === "report" ? "report" : "message";
 		const message = await this.editorCall(
 			container,
-			buildRequestText(container.task, "report", report.text),
-			Math.max(512, report.tokens * 2),
+			buildRequestText(container.task, quoteTag, item.text),
+			Math.max(512, item.tokens * 2),
 		);
 		if (!message) return;
 		const spentTokens = message.usage?.totalTokens ?? 0;
 		const spentOutput = message.usage?.output ?? 0;
-		const verdict = validateReport(message, estimate);
+		const verdict = validateRewrite(message, estimate);
 		if (!verdict.ok) {
 			const reason = message.errorMessage ? `${verdict.reason}: ${message.errorMessage}` : verdict.reason;
 			if (!verdict.terminal) {
-				const attempts = (this.attempts.get(report.entryId) ?? 0) + 1;
-				this.attempts.set(report.entryId, attempts);
+				const attempts = (this.attempts.get(item.entryId) ?? 0) + 1;
+				this.attempts.set(item.entryId, attempts);
 				if (attempts < MAX_ATTEMPTS) {
 					this.spentTokens += spentTokens;
 					this.spentOutput += spentOutput;
 					throw new Error(reason);
 				}
 			}
-			this.attempts.delete(report.entryId);
-			const record: RejectedReportRecord = { targetEntryId: report.entryId, reason, spentTokens, spentOutput };
-			this.persist(REJECTED_REPORT_ENTRY, record);
-			this.reportRejected.set(report.entryId, reason);
+			this.attempts.delete(item.entryId);
+			const record: RejectedRewriteRecord = { targetEntryId: item.entryId, reason, spentTokens, spentOutput };
+			this.persist(rejectedType, record);
+			this.rewriteRejected.set(item.entryId, reason);
 			this.rejectedSpentTokens += spentTokens;
 			this.rejectedSpentOutput += spentOutput;
 			return;
 		}
-		this.attempts.delete(report.entryId);
-		const record: ReportRecord = {
-			targetEntryId: report.entryId,
-			rawTokens: report.tokens,
+		this.attempts.delete(item.entryId);
+		const record: RewriteRecord = {
+			targetEntryId: item.entryId,
+			rawTokens: item.tokens,
 			rewrittenTokens: verdict.tokens,
 			rewrittenText: verdict.text,
 			spentTokens,
 			spentOutput,
 		};
-		this.persist(REPORT_ENTRY, record);
-		this.reportRecords.set(report.entryId, record);
+		this.persist(appliedType, record);
+		this.rewrites.set(item.entryId, record);
 		this.rebuildSubstitutions();
 		this.redrawMessages();
 	}
@@ -776,7 +834,8 @@ class SessionTidy {
 				const work = this.pickWork();
 				if (!work) return;
 				if (work.kind === "digest") await this.compact(work.candidate);
-				else await this.rewrite(work.report);
+				else if (work.kind === "report") await this.rewriteText(work.report, "report");
+				else await this.rewriteText(work.reply, "reply");
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -854,7 +913,7 @@ class SessionTidy {
 				rawThinkingTokens: this.rawThinkingTokens,
 				contextThinkingTokens: this.rawThinkingTokens - this.savedThinkingTokens,
 				generatedTokens: this.spentOutput,
-				rewrittenReports: this.rewrittenReports,
+				rewrittenTexts: this.rewrittenReports + this.rewrittenReplies,
 			},
 			frame,
 		);
@@ -865,6 +924,7 @@ class SessionTidy {
 		return (
 			`session-tidy: ${this.enabled ? "on" : "off"} · ` +
 			`digests ${this.activeDigests} · reports ${this.rewrittenReports} · ` +
+			`replies ${this.rewrittenReplies} · ` +
 			`saved ${formatTokens(this.savedThinkingTokens)} tokens · ` +
 			`generated ${formatTokens(this.spentOutput)} tokens · ` +
 			`read ${formatTokens(this.spentTokens)} prefix tokens`
