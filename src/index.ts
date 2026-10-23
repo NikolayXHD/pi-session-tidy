@@ -19,7 +19,7 @@
  * size and the compaction threshold from the real `usage`, not from a rough
  * character estimate.
  */
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getCurrentTools, type Message, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import {
@@ -528,16 +528,7 @@ class SessionTidy {
 
 	private transformMarkdown(markdown: string, context: MarkdownTransformContext): string {
 		if (context.messageType !== "assistant") return markdown;
-		const key = normalizeText(markdown);
-		const rewritten = this.rewriteByRaw.get(key);
-		try {
-			appendFileSync(
-				"/tmp/session-tidy-transform.log",
-				`${Date.now()} ${JSON.stringify({ hit: rewritten !== undefined, key: key.slice(0, 40) })}\n`,
-			);
-		} catch {
-			// Debug log only.
-		}
+		const rewritten = this.rewriteByRaw.get(normalizeText(markdown));
 		if (rewritten === undefined) return markdown;
 		if (this.debug) return `${markdown}\n\n---\n\n${rewritten}`;
 		return rewritten;
@@ -638,6 +629,7 @@ class SessionTidy {
 		this.persist(REPORT_ENTRY, record);
 		this.reportRecords.set(report.entryId, record);
 		this.rebuildSubstitutions();
+		this.redrawMessages();
 	}
 
 	/** A digest stands in the place of the raw block: shorter, nothing lost. */
@@ -896,6 +888,19 @@ class SessionTidy {
 		const manager = this.manager;
 		if (!manager) return;
 		this.rawThinkingTokens = this.measureRawThinking(manager.buildSessionProjection());
+	}
+
+	/**
+	 * Rebuild assistant messages so the render transform re-runs: restoring the
+	 * default hidden-thinking label re-renders them. Without it a fresh rewrite
+	 * waits for the next rebuild — a resize or a restart.
+	 */
+	private redrawMessages(): void {
+		try {
+			this.ui?.setHiddenThinkingLabel();
+		} catch {
+			// Stale UI after a session replacement.
+		}
 	}
 
 	private updateStatus(): void {
