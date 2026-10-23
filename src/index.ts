@@ -95,45 +95,6 @@ const DIGESTS_CONTAINER = "digests";
 const REPORTS_CONTAINER = "reports";
 const REPLIES_CONTAINER = "replies";
 
-const DEFAULT_DIGEST_TASK = [
-	"You are a compression tool, not the assistant in the transcript above.",
-	"",
-	"Rewrite the thinking block quoted below in the same language, shorter, cleaner",
-	"and better organized. Keep every option considered and rejected with the",
-	"reason it was rejected, every decision and its reason, every fact the",
-	"reasoning relied on, every open question. Drop repetitions and filler.",
-	"",
-	"Wrap the result in <digest> and </digest> tags.",
-].join("\n");
-
-const DEFAULT_REPORT_TASK = [
-	"You are an editing tool, not the assistant in the transcript above.",
-	"",
-	"Rewrite the report quoted below so the reader understands it on the first",
-	"reading. Keep the voice: the rewrite is the assistant's own message to the",
-	"reader — restate it, never describe it. Follow the writing rules from the",
-	"context. When the content sorts things into categories — what is covered and",
-	"what is not, for and against, variants — give those as explicit lists with",
-	"concrete names, not as flowing prose. Keep every fact, decision, reason and",
-	"open question of the original — the rewrite may be longer, but nothing may",
-	"be lost.",
-	"",
-	"Wrap the result in <rewrite> and </rewrite> tags.",
-].join("\n");
-
-const DEFAULT_REPLY_TASK = [
-	"You are an editing tool, not the assistant in the transcript above.",
-	"",
-	"The message quoted below is what the human typed in the heat of the moment:",
-	"caps lock, profanity, fragments. Extract what it carries — the demand, the",
-	"correction, the priority, the reason for the anger — and rewrite it as a",
-	"calm, clear message in the same language. The force survives as content, not",
-	"as noise: keep every fact and intent. Never describe the message, restate",
-	"it.",
-	"",
-	"Wrap the result in <rewrite> and </rewrite> tags.",
-].join("\n");
-
 interface AppliedRecord {
 	targetEntryId: string;
 	blockIndex: number;
@@ -258,24 +219,16 @@ function writeDefaultFile(path: string, content: string): void {
 	writeFileSync(path, content);
 }
 
-function loadContainer(name: string, fallbackTask: string): { container: Container; problems: string[]; created?: string } {
+function loadContainer(name: string): { container: Container | undefined; problems: string[] } {
 	const path = containerPath(name);
 	try {
 		const container = parseContainer(readFileSync(path, "utf8"));
-		if (container.task === "") {
-			return {
-				container: { ...container, task: fallbackTask },
-				problems: [`${path}: the task text is empty, the built-in text is used`],
-			};
-		}
+		if (container.task === "") return { container: undefined, problems: [] };
 		return { container, problems: [] };
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-			writeDefaultFile(path, `${fallbackTask.trim()}\n`);
-			return { container: { task: fallbackTask }, problems: [], created: path };
-		}
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { container: undefined, problems: [] };
 		const message = error instanceof Error ? error.message : String(error);
-		return { container: { task: fallbackTask }, problems: [`${path}: ${message}`] };
+		return { container: undefined, problems: [`${path}: ${message}`] };
 	}
 }
 
@@ -291,9 +244,9 @@ class SessionTidy {
 	private config: Config;
 	private readonly problems: string[];
 	private readonly created: string[];
-	private digestsContainer: Container;
-	private reportsContainer: Container;
-	private repliesContainer: Container;
+	private digestsContainer: Container | undefined;
+	private reportsContainer: Container | undefined;
+	private repliesContainer: Container | undefined;
 	private readonly announced = new Set<string>();
 	private readonly appliedRecords = new Map<string, AppliedRecord>();
 	private readonly rejected = new Map<string, string>();
@@ -339,16 +292,14 @@ class SessionTidy {
 		this.pi = pi;
 		const loaded = loadConfig();
 		this.config = loaded.config;
-		const digests = loadContainer(DIGESTS_CONTAINER, DEFAULT_DIGEST_TASK);
+		const digests = loadContainer(DIGESTS_CONTAINER);
 		this.digestsContainer = digests.container;
-		const reports = loadContainer(REPORTS_CONTAINER, DEFAULT_REPORT_TASK);
+		const reports = loadContainer(REPORTS_CONTAINER);
 		this.reportsContainer = reports.container;
-		const replies = loadContainer(REPLIES_CONTAINER, DEFAULT_REPLY_TASK);
+		const replies = loadContainer(REPLIES_CONTAINER);
 		this.repliesContainer = replies.container;
 		this.problems = [...loaded.problems, ...digests.problems, ...reports.problems, ...replies.problems];
-		this.created = [loaded.created, digests.created, reports.created, replies.created].filter(
-			(path): path is string => path !== undefined,
-		);
+		this.created = loaded.created ? [loaded.created] : [];
 		this.enabled = loaded.config.enabled;
 		this.debug = loaded.config.debug;
 
@@ -499,9 +450,9 @@ class SessionTidy {
 							(this.config = { ...this.config, acceptanceRatio: value }),
 						),
 				},
-				{ label: "container digests.md", run: () => this.editContainer(ui, DIGESTS_CONTAINER) },
-				{ label: "container reports.md", run: () => this.editContainer(ui, REPORTS_CONTAINER) },
-				{ label: "container replies.md", run: () => this.editContainer(ui, REPLIES_CONTAINER) },
+				{ label: `container digests.md${this.digestsContainer ? "" : " — no task, subtask off"}`, run: () => this.editContainer(ui, DIGESTS_CONTAINER) },
+				{ label: `container reports.md${this.reportsContainer ? "" : " — no task, subtask off"}`, run: () => this.editContainer(ui, REPORTS_CONTAINER) },
+				{ label: `container replies.md${this.repliesContainer ? "" : " — no task, subtask off"}`, run: () => this.editContainer(ui, REPLIES_CONTAINER) },
 				{ label: "dump thinking", run: () => this.dump() },
 			];
 			const choice = await ui.select(`session-tidy · ${this.statusText() ?? "off"}`, rows.map((row) => row.label));
@@ -560,12 +511,16 @@ class SessionTidy {
 
 	private async editContainer(ui: ExtensionContext["ui"], name: string): Promise<void> {
 		const path = containerPath(name);
-		const text = await ui.editor(`${name}.md`, readFileSync(path, "utf8"));
+		let current = "";
+		try {
+			current = readFileSync(path, "utf8");
+		} catch {
+			// A missing container opens empty: the task is authored by the human.
+		}
+		const text = await ui.editor(`${name}.md`, current);
 		if (text === undefined) return;
 		writeFileSync(path, text.endsWith("\n") ? text : `${text}\n`);
-		const fallback =
-			name === DIGESTS_CONTAINER ? DEFAULT_DIGEST_TASK : name === REPORTS_CONTAINER ? DEFAULT_REPORT_TASK : DEFAULT_REPLY_TASK;
-		const loaded = loadContainer(name, fallback);
+		const loaded = loadContainer(name);
 		if (name === DIGESTS_CONTAINER) this.digestsContainer = loaded.container;
 		else if (name === REPORTS_CONTAINER) this.reportsContainer = loaded.container;
 		else this.repliesContainer = loaded.container;
@@ -746,9 +701,9 @@ class SessionTidy {
 		}
 		const skipDigests = new Set<string>([...this.appliedRecords.keys(), ...this.rejected.keys(), ...changed]);
 		const skipTexts = new Set<string>([...this.rewrites.keys(), ...this.rewriteRejected.keys(), ...textChanged]);
-		const digests = selectCandidates(assistants, skipDigests, this.config, estimate);
-		const reports = selectReports(assistants, skipTexts, this.config.minReportTokens, estimate);
-		const replyItems = selectReplies(replies, skipTexts, estimate);
+		const digests = this.digestsContainer ? selectCandidates(assistants, skipDigests, this.config, estimate) : [];
+		const reports = this.reportsContainer ? selectReports(assistants, skipTexts, this.config.minReportTokens, estimate) : [];
+		const replyItems = this.repliesContainer ? selectReplies(replies, skipTexts, estimate) : [];
 		return orderWork(slots, digests, reports, replyItems)[0];
 	}
 
@@ -759,6 +714,7 @@ class SessionTidy {
 	 */
 	private async rewriteText(item: { entryId: string; text: string; tokens: number }, kind: "report" | "reply"): Promise<void> {
 		const container = kind === "report" ? this.reportsContainer : this.repliesContainer;
+		if (!container) return;
 		const appliedType = kind === "report" ? REPORT_ENTRY : REPLY_ENTRY;
 		const rejectedType = kind === "report" ? REJECTED_REPORT_ENTRY : REJECTED_REPLY_ENTRY;
 		const quoteTag = kind === "report" ? "report" : "message";
@@ -808,6 +764,7 @@ class SessionTidy {
 	/** A digest stands in the place of the raw block: shorter, nothing lost. */
 	private async compact(candidate: Candidate): Promise<void> {
 		const container = this.digestsContainer;
+		if (!container) return;
 		const message = await this.editorCall(
 			container,
 			buildRequestText(container.task, "thinking_block", candidate.text),

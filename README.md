@@ -129,8 +129,8 @@ thinking: high
 Rewrite the thinking block quoted below in the same language, shorter …
 ```
 
-Without the file the extension creates it with the built-in task text and says
-so.
+There is no built-in task text: a prompt is authored by the human. No prompt
+— the subtask does not run, and the menu says so on the container row.
 
 ## How it works
 

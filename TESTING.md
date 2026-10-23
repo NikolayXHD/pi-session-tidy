@@ -22,10 +22,11 @@ Fields: `enabled`, `k`, `minTokens`, `acceptanceRatio`, `minReportTokens`,
 missing file is created with the defaults and announced; an unusable value
 falls back to its default and is reported by name.
 
-Per-subtask settings live in `~/.pi/agent/session-tidy/digests.md` and
-`reports.md`: frontmatter `model` and `thinking` override the config, the body
-is the task text. A missing file is created with the built-in task text and
-announced; an empty task text warns and falls back to the built-in text.
+Per-subtask settings live in `~/.pi/agent/session-tidy/digests.md`,
+`reports.md` and `replies.md`: frontmatter `model` and `thinking` override the
+config, the body is the task text. There is no built-in task text: a missing
+file or an empty task means the subtask does not run, and the menu shows the
+container row as `— no task, subtask off`.
 
 ## Selection and replacement
 
@@ -149,6 +150,7 @@ reply shows both texts in one message: the raw wording as typed, a divider,
 and the clear wording below it. The rewrite extracts the demand: the force
 survives as content, the noise does not.
 
-Loud defaults. With no settings file and no container the session start
-announces their creation, and the files on disk hold the defaults. A `k` of
-`-3` or a model of `7` warns by name and falls back to the default.
+Loud defaults. With no settings file the session start announces its creation
+and the file on disk holds the defaults; a `k` of `-3` or a model of `7`
+warns by name and falls back to the default. Containers are never created:
+no prompt, no subtask.
