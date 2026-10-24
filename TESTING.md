@@ -110,6 +110,14 @@ substitution the main requests use, which the logger scenario above verifies.
 Extension events do not fire for extension-initiated calls: the logger sees
 only the session requests, not the editor ones.
 
+Turn serialization. With tidy on, send the next message while a background call
+still runs (the spinner follows the balloon). The turn waits for the queue:
+before the request goes out the queue drains to the empty end, so its messages
+carry the digests and rewrites of everything past and nothing is substituted
+after the fact. The logger scenario above shows the request; the session JSONL
+shows the `session-tidy-*` entries of the drained work landing before the next
+answer starts. All or nothing — a request never sees a half-done context.
+
 The summarizer sees digests. A temporary logger extension on
 `session_before_compact` writes thinking block lengths from
 `preparation.messagesToSummarize`; those must be digests, not raw text.
