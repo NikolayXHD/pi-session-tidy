@@ -17,8 +17,8 @@ request sees a text that changes after the fact.
 
 ## Config
 
-The file is `~/.pi/agent/session-tidy.json` (the former
-`~/.pi/agent/compact-thinking.json` is read when the new file is missing).
+The file is `~/.pi/agent/tidy.json` (the former `session-tidy.json` and
+`compact-thinking.json` are read when the new file is missing).
 Fields: `minTokens`, `acceptanceRatio`, `minReportTokens`, `model`, `thinking`.
 The mode is not a config field: tidy stays off until `/tidy`. Removed fields
 left in an old config — `enabled`, `k`, `debug` — are reported by name, never
@@ -144,7 +144,8 @@ reasoning-field signature it is dropped.
 
 Rename. A session written before the rename keeps its digests: entries
 `compact-thinking-applied` and `hybrid-thinking-applied` are read like
-`session-tidy-applied`. With only `compact-thinking.json` on disk the config is
+`session-tidy-applied`. With only `session-tidy.json` or
+`compact-thinking.json` on disk the config is
 read from it.
 
 Container model. With `model: provider/id` in `digests.md` the background calls

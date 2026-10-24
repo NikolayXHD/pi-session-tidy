@@ -195,11 +195,11 @@ function asRejectedRewriteRecord(data: unknown): RejectedRewriteRecord | undefin
 }
 
 function configPath(): string {
-	return join(getAgentDir(), "session-tidy.json");
+	return join(getAgentDir(), "tidy.json");
 }
 
 function loadConfig(): { config: Config; problems: string[]; created?: string } {
-	for (const path of [configPath(), legacyConfigPath()]) {
+	for (const path of [configPath(), ...legacyConfigPaths()]) {
 		try {
 			const parsed = parseConfig(JSON.parse(readFileSync(path, "utf8")));
 			return { config: parsed.config, problems: parsed.problems.map((problem) => `${path}: ${problem}`) };
@@ -214,9 +214,9 @@ function loadConfig(): { config: Config; problems: string[]; created?: string } 
 	return { config: DEFAULT_CONFIG, problems: [], created: path };
 }
 
-/** Config of the former extension name: read so old setups keep working. */
-function legacyConfigPath(): string {
-	return join(getAgentDir(), "compact-thinking.json");
+/** Config names of former versions: read so old setups keep working. */
+function legacyConfigPaths(): string[] {
+	return [join(getAgentDir(), "session-tidy.json"), join(getAgentDir(), "compact-thinking.json")];
 }
 
 function containerPath(name: string): string {

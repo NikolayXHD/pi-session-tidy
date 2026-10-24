@@ -109,8 +109,8 @@ the session JSONL under `~/.pi/agent/sessions/`.
 pi install git:github.com/NikolayXHD/pi-session-tidy
 ```
 
-Settings: `~/.pi/agent/session-tidy.json`. The former
-`~/.pi/agent/compact-thinking.json` is read when the new file is missing. A
+Settings: `~/.pi/agent/tidy.json`. The former `session-tidy.json` and
+`compact-thinking.json` are read when the new file is missing. A
 missing settings file and a missing container are created with the default
 content and announced — nothing runs on a hidden default. The mode is not a
 config field: tidy stays off until `/tidy` turns it on.
