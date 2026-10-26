@@ -279,7 +279,12 @@ class SessionTidy {
 	/** Context with digests substituted, keyed by assistant message time. */
 	private substitutions = new Map<number, AssistantContent>();
 
-	private enabled: boolean;
+	/** Observation: the queue takes new messages as they come. */
+	private continual: boolean;
+	/** Corrections go into the model context; off — they stay in the records only. */
+	private applyChanges: boolean;
+	/** Work has been started (`/tidy`) — the footer carries the counters. */
+	private started: boolean;
 	private running = false;
 	private rewrittenReports = 0;
 	private rewrittenReplies = 0;
@@ -308,8 +313,10 @@ class SessionTidy {
 		this.repliesContainer = replies.container;
 		this.problems = [...loaded.problems, ...digests.problems, ...reports.problems, ...replies.problems];
 		this.created = loaded.created ? [loaded.created] : [];
-		/** Off until `/tidy`: the mode starts on demand, never from the config. */
-		this.enabled = false;
+		/** Work starts on demand (`/tidy`), never from the config; applying corrections is the normal state. */
+		this.started = false;
+		this.continual = false;
+		this.applyChanges = true;
 
 		pi.on("session_start", (_event, ctx) => this.onSessionStart(ctx));
 		pi.on("session_tree", (_event: SessionTreeEvent, ctx) => this.onTree(ctx));
@@ -340,7 +347,9 @@ class SessionTidy {
 		this.capture(ctx);
 		this.generation += 1;
 		this.systemOptions = undefined;
-		this.enabled = false;
+		this.started = false;
+		this.continual = false;
+		this.applyChanges = true;
 		this.rebuild();
 		if (this.problems.length > 0) {
 			for (const problem of this.problems) this.warn(`tidy: ${problem}`);
@@ -364,19 +373,19 @@ class SessionTidy {
 	/**
 	 * Context before the model request: the queue is drained first — the request
 	 * goes out only with the final texts of everything past — and digests take
-	 * the place of raw blocks. Nothing is touched while the mode is off.
+	 * the place of raw blocks. Corrections apply only while `applyChanges` is on.
 	 */
 	private async onContext(event: ContextEvent): Promise<ContextEventResult | undefined> {
-		if (!this.enabled) return undefined;
 		await this.drain();
+		if (!this.applyChanges) return undefined;
 		const messages = this.substituteMessages(event.messages);
 		return messages ? { messages } : undefined;
 	}
 
 	/** The same context for Pi's summarizer: the preparation is edited in place. */
 	private async onBeforeCompact(event: SessionBeforeCompactEvent): Promise<void> {
-		if (!this.enabled) return;
 		await this.drain();
+		if (!this.applyChanges) return;
 		const summarized = this.substituteMessages(event.preparation.messagesToSummarize);
 		if (summarized) event.preparation.messagesToSummarize = summarized;
 		const prefix = this.substituteMessages(event.preparation.turnPrefixMessages);
@@ -387,7 +396,7 @@ class SessionTidy {
 	private onToolExecutionStart(ctx: ExtensionContext): void {
 		this.capture(ctx);
 		this.refreshThinkingTokens();
-		this.pump();
+		if (this.continual) this.pump();
 	}
 
 	private onTurnEnd(ctx: ExtensionContext): void {
@@ -400,15 +409,15 @@ class SessionTidy {
 		this.capture(ctx);
 		this.refreshThinkingTokens();
 		this.updateStatus();
-		this.pump();
+		if (this.continual) this.pump();
 	}
 
-	/** `/tidy`: the mode on for this session — the status line marks it. */
+	/** `/tidy`: the work starts — everything new since the last run. */
 	private onTidy(ctx: ExtensionContext): void {
 		this.capture(ctx);
-		this.enabled = true;
+		this.started = true;
 		this.updateStatus();
-		this.notify("tidy: on", "info");
+		this.notify("tidy: run", "info");
 		this.pump();
 	}
 
@@ -428,11 +437,18 @@ class SessionTidy {
 		for (;;) {
 			const rows: { label: string; run: () => void | Promise<void> }[] = [
 				{
-					label: `mode (session): ${this.enabled ? "on" : "off"}`,
+					label: `continual: ${this.continual ? "on" : "off"}`,
 					run: () => {
-						this.enabled = !this.enabled;
+						this.continual = !this.continual;
 						this.updateStatus();
-						if (this.enabled) this.pump();
+						if (this.continual) this.pump();
+					},
+				},
+				{
+					label: `apply changes to context: ${this.applyChanges ? "on" : "off"}`,
+					run: () => {
+						this.applyChanges = !this.applyChanges;
+						this.updateStatus();
 					},
 				},
 				{ label: `editor model: ${this.config.model ?? "session model"}`, run: () => this.pickModel(ui) },
@@ -650,14 +666,14 @@ class SessionTidy {
 	/**
 	 * The rewritten text is drawn where its record sits in the session: the
 	 * entry position is the attribution, never the text — two identical messages
-	 * carry two rewrites. Nothing is shown while the mode is off.
+	 * carry two rewrites.
 	 */
 	private renderRewritten(
 		data: RewriteRecord | undefined,
 		label: string,
 		theme: Parameters<EntryRenderer<RewriteRecord>>[2],
 	): ReturnType<EntryRenderer<RewriteRecord>> {
-		if (!this.enabled || data?.rewrittenText === undefined) return undefined;
+		if (data?.rewrittenText === undefined) return undefined;
 		if (!this.sourceStillStands(data)) return undefined;
 		const box = new Box(1, 0);
 		box.addChild(new Text(`${theme.fg("accent", `[${label}]`)} ${data.rewrittenText}`, 0, 0));
@@ -919,16 +935,16 @@ class SessionTidy {
 		return found;
 	}
 
-	/** Start the background job: the tool window, the settle, the mode on. */
+	/** Start the background job: the tool window, the settle, `continual`. */
 	private pump(): void {
-		if (this.running || !this.enabled) return;
+		if (this.running) return;
 		this.pumpPromise = this.runQueue();
 	}
 
 	/**
-	 * The serialized drain: the queue runs to the empty end before a request goes
-	 * out — all or nothing, like compaction (@NikolayXHD). No request sees a text
-	 * that changes after the fact.
+	 * The serialized drain: a run already going finishes before a request goes
+	 * out — no request sees a text that changes after the fact. Pending work
+	 * waits for the next run while `continual` is off.
 	 */
 	private async drain(): Promise<void> {
 		for (;;) {
@@ -938,21 +954,21 @@ class SessionTidy {
 				await running;
 				continue;
 			}
-			if (!this.enabled || !this.pickWork()) return;
+			if (!this.continual || !this.pickWork()) return;
 			this.pumpPromise = this.runQueue();
 		}
 	}
 
 	/** One background job: walk the queue while there is work. */
 	private async runQueue(): Promise<void> {
-		if (this.running || !this.enabled) return;
+		if (this.running) return;
 		const generation = this.generation;
 		this.running = true;
 		this.refreshThinkingTokens();
 		this.startSpinner();
 		try {
 			for (;;) {
-				if (generation !== this.generation || !this.enabled) return;
+				if (generation !== this.generation) return;
 				const work = this.pickWork();
 				if (!work) return;
 				if (work.kind === "digest") await this.compact(work.candidate);
@@ -1030,7 +1046,7 @@ class SessionTidy {
 		const frame = SPINNER_FRAMES[this.spinnerIndex] ?? " ";
 		return formatStatusText(
 			{
-				enabled: this.enabled,
+				enabled: this.started,
 				running: this.running,
 				rawThinkingTokens: this.rawThinkingTokens,
 				contextThinkingTokens: this.rawThinkingTokens - this.savedThinkingTokens,
@@ -1045,7 +1061,7 @@ class SessionTidy {
 	/** Counters and spending behind the menu row. */
 	private reportText(): string {
 		return (
-			`tidy: ${this.enabled ? "on" : "off"} · ` +
+			`tidy: continual ${this.continual ? "on" : "off"} · apply changes to context ${this.applyChanges ? "on" : "off"} · ` +
 			`digests ${this.activeDigests} · reports ${this.rewrittenReports} · ` +
 			`replies ${this.rewrittenReplies} · ` +
 			`saved ${formatTokens(this.savedThinkingTokens)} tokens · ` +

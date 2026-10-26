@@ -542,6 +542,7 @@ export function formatTokens(tokens: number): string {
 }
 
 export interface StatusCounts {
+	/** The work has been started (`/tidy`): before that the footer stays empty. */
 	enabled: boolean;
 	running: boolean;
 	/** Raw reasoning tokens in the context. */
@@ -556,7 +557,7 @@ export interface StatusCounts {
 	rewrittenReplies: number;
 }
 
-/** Undefined when the mode is off: the footer shows nothing instead of a label. */
+/** Undefined until the work starts: the footer shows nothing instead of a label. */
 export function formatStatusText(counts: StatusCounts, spinnerFrame = " "): string | undefined {
 	if (!counts.enabled) return undefined;
 	const separator = counts.running ? spinnerFrame : " ";

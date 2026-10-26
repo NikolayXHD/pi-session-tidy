@@ -54,19 +54,21 @@ counters: `✍` rewritten reports, `😞` rewritten replies. Only texts that had
 problem are rewritten, so both counters count writing problems: reports show
 how the session model writes, replies — the human's outbursts (@NikolayXHD:
 «счётчик моей печали»), a quality signal of the model too. A counter appears
-after its first rewrite. Spinner while a background call runs. While the mode
-is off the footer is empty and nothing is rewritten, substituted or shown.
+after its first rewrite. Spinner while a background call runs. Before `/tidy`
+the footer is empty — no work runs.
 
-- `/tidy` — turn the tidying on for this session; the status line appears;
-- `/tidy-settings` — the settings menu; its `mode (session)` row turns the
-  tidying off.
+- `/tidy` — start the work: everything new since the last run; the status line
+  appears;
+- `/tidy-settings` — the settings menu: `continual` (new messages are taken as
+  they come) and `apply changes to context` (corrections reach the model
+  context).
 
 ## Settings menu
 
 `/tidy-settings` opens the menu: the title carries the state, row labels carry
 current values. Enter on a row changes the value and the menu stays open. The
-`mode (session)` row changes the running session only — it is the off switch;
-every other row writes the config file. Model and thinking level open a
+`continual` and `apply changes to context` rows change the running session
+only; every other row writes the config file. Model and thinking level open a
 picker, number rows open an input, container rows open the container text in
 the editor. `counters report` prints digests, rewrites and spending; `dump
 thinking` writes the thinking files.
@@ -112,8 +114,9 @@ pi install git:github.com/NikolayXHD/pi-session-tidy
 Settings: `~/.pi/agent/tidy.json`. The former `session-tidy.json` and
 `compact-thinking.json` are read when the new file is missing. A
 missing settings file and a missing container are created with the default
-content and announced — nothing runs on a hidden default. The mode is not a
-config field: tidy stays off until `/tidy` turns it on.
+content and announced — nothing runs on a hidden default. Neither switch is a
+config field: the work starts with `/tidy`, and `continual` is off until the
+menu turns it on.
 
 | field             | default       | meaning                        |
 | ----------------- | ------------- | ------------------------------ |
@@ -123,8 +126,9 @@ config field: tidy stays off until `/tidy` turns it on.
 | `model`           | session model | model of the background calls  |
 | `thinking`        | none          | thinking level of the calls    |
 
-The mode is not a config field: tidy stays off until `/tidy` turns it on.
-Removed fields left in an old config — `enabled`, `k`, `debug` — are reported
+The work does not start on its own: `/tidy` starts it, `continual` decides
+whether new messages are taken afterwards. Removed fields left in an old
+config — `enabled`, `k`, `debug` — are reported
 by name, never silently ignored.
 
 ## Containers

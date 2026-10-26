@@ -20,7 +20,8 @@ request sees a text that changes after the fact.
 The file is `~/.pi/agent/tidy.json` (the former `session-tidy.json` and
 `compact-thinking.json` are read when the new file is missing).
 Fields: `minTokens`, `acceptanceRatio`, `minReportTokens`, `model`, `thinking`.
-The mode is not a config field: tidy stays off until `/tidy`. Removed fields
+Neither switch is a config field: the work starts with `/tidy`, and
+`continual` is off until the menu turns it on. Removed fields
 left in an old config — `enabled`, `k`, `debug` — are reported by name, never
 silently ignored. A missing file is created with the defaults and announced;
 an unusable value falls back to its default and is reported by name.
@@ -76,7 +77,7 @@ Run each scenario in an empty directory so the JSONL lands in its own place:
 `mkdir -p /tmp/session-tidy-check` and run `pi -p "..."` inside it.
 
 Status. Without `/tidy` the footer shows nothing and no work runs. `/tidy`
-turns the mode on for this session and the footer shows `💭 -…k/…k +…k`:
+starts the work and the footer shows `💭 -…k/…k +…k`:
 savings, raw reasoning sum and generation of the background calls; after the
 first rewrite the counters follow — `✍ 2` for rewritten reports, `😞 1` for
 rewritten replies. While the background call runs, a spinner follows the
@@ -88,10 +89,12 @@ second number must not stay zero.
 
 Settings menu. `/tidy-settings` opens the menu with the state in the title and
 current values in the rows. Enter on a row changes the value and the menu
-stays open. The `mode (session)` row changes the running session only and is
-the off switch; the model, thinking level and number rows write the config
-file — after changing `minTokens` the file holds the new value. Container rows
-open the text in the editor and save it on close.
+stays open. The `continual` and `apply changes to context` rows change the
+running session only: the first takes new messages as they come, the second
+sends corrections into the model context; the model, thinking level and
+number rows write the config file — after changing `minTokens` the file holds
+the new value. Container rows open the text in the editor and save it on
+close.
 
 Compaction during a task. With `minTokens` around 16 ask the agent
 to run several bash commands in a row. After the second answer the session
@@ -138,8 +141,10 @@ Resume. Interrupt a session and resume it. Digests are restored from
 `session-tidy-applied` entries and substituted into the context again; the
 status matches the number of active entries.
 
-Disable. `mode (session): off` in the menu — no new extension entries appear
-and the footer shows nothing until `/tidy` again.
+Stop and shadow. `continual: off` — the queue stops taking new messages, the
+work already done stays. `apply changes to context: off` — the model sees the
+text as typed while records and blocks stay; `on` brings the corrections back
+from the next turn.
 
 Dump. After several compactions the `dump thinking` row writes `thinking-a`
 and `thinking-b` next to the session JSONL; block headings match in both files,
@@ -181,9 +186,8 @@ shows `😞 1`.
 
 Attribution by position. Send the same short reply several times ("да" to
 several questions). Each rewrite block sits under its own message with its own
-text: identical messages never share a rewrite. Turn tidy off — the blocks
-disappear and no substitution reaches the model; the entries stay in the
-JSONL.
+text: identical messages never share a rewrite. Turn `apply changes to
+context` off — no substitution reaches the model; blocks and entries stay.
 
 Calm reply. Send a calm short reply — "ok", a plain question. The message
 stays a single text, no divider; the session JSONL gains a
