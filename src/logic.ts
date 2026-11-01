@@ -455,16 +455,20 @@ function answerText(content: readonly ContentBlock[]): string {
 }
 
 /**
- * A stopped answer fails, but not every failure is the text's fault: an answer
- * cut off by our own output budget retries with a bigger one instead of being
- * rejected — length is no criterion.
+ * A stopped answer fails, but not every failure is the text's fault. The
+ * extension sets no output budget of its own — a call asks for the model's own
+ * output ceiling — so a cut off answer means the model hit that ceiling: the
+ * refusal names it, and no length criterion of ours hides behind it.
  */
-function stopFailure(result: AttemptResult): Verdict | undefined {
+function stopFailure(result: AttemptResult): { ok: false; reason: string; terminal: boolean } | undefined {
 	if (result.stopReason === "stop") return undefined;
 	return {
 		ok: false,
-		reason: `stop reason: ${result.stopReason}`,
-		terminal: result.stopReason !== "error" && result.stopReason !== "aborted" && result.stopReason !== "length",
+		reason:
+			result.stopReason === "length"
+				? "stop reason: length — the model hit its own output ceiling"
+				: `stop reason: ${result.stopReason}`,
+		terminal: result.stopReason !== "error" && result.stopReason !== "aborted",
 	};
 }
 

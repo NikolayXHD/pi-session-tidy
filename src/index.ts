@@ -762,7 +762,6 @@ class SessionTidy {
 		const message = await this.editorCall(
 			container,
 			buildRequestText(container.task, quoteTag, item.text),
-			this.attemptBudget(Math.max(2048, item.tokens * 4), item.entryId),
 		);
 		if (!message) return;
 		const spentTokens = message.usage?.totalTokens ?? 0;
@@ -803,14 +802,6 @@ class SessionTidy {
 		this.rebuildSubstitutions();
 	}
 
-	/**
-	 * The output budget doubles per attempt: an answer cut off by our own budget
-	 * is our fault, never a reason to reject the text.
-	 */
-	private attemptBudget(base: number, key: string): number {
-		return base * 2 ** (this.attempts.get(key) ?? 0);
-	}
-
 	/** A digest stands in the place of the raw block: shorter, nothing lost. */
 	private async compact(candidate: Candidate): Promise<void> {
 		const container = this.digestsContainer;
@@ -818,7 +809,6 @@ class SessionTidy {
 		const message = await this.editorCall(
 			container,
 			buildRequestText(container.task, "thinking_block", candidate.text),
-			this.attemptBudget(Math.max(512, candidate.tokens * 1.5), blockKey(candidate.entryId, candidate.blockIndex)),
 		);
 		if (!message) return;
 		const spentTokens = message.usage?.totalTokens ?? 0;
@@ -873,7 +863,7 @@ class SessionTidy {
 	 * earlier results. With a forced system prompt Pi collapses system messages
 	 * into one head — mirrored here. Undefined when the session moved on.
 	 */
-	private async editorCall(container: Container, requestText: string, maxTokens: number) {
+	private async editorCall(container: Container, requestText: string) {
 		const manager = this.manager;
 		const registry = this.registry;
 		const model = this.editorModel(container.model ?? this.config.model);
@@ -901,7 +891,7 @@ class SessionTidy {
 		try {
 			const reasoning = (container.thinking ?? this.config.thinking) as SimpleStreamOptions["reasoning"];
 			const stream = registry.streamSimple(model, { messages: prefix }, {
-				maxTokens,
+				maxTokens: model.maxTokens > 0 ? model.maxTokens : undefined,
 				toolChoice: "none",
 				...(reasoning !== undefined ? { reasoning } : {}),
 				sessionId: manager.getSessionId(),

@@ -157,9 +157,10 @@ There is no built-in task text: a prompt is authored by the human. No prompt
 A digest and a rewrite are separate calls over the same session prefix: no
 tools, the answer wrapped in `<digest>…</digest>` or in one of the two rewrite
 marks — `<unchanged/>` or `<rewrite>…</rewrite>`.
-The output budget is never a rejection reason: an answer cut off by the budget
-retries with a doubled one — a rewrite may be longer than its report and is
-never cut to fit.
+The extension sets no output budget of its own: every call asks for the model's
+own output ceiling, so a rewrite is never cut to fit. An answer cut off at that
+ceiling is rejected naming the ceiling — no length criterion of ours hides
+behind it.
 The calls go to the model named by `model` — the config base, overridden by the
 container; without `model` the session model does the work and the extension
 says so. The prefix already carries earlier transformations, so later calls

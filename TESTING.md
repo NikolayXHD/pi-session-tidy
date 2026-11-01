@@ -51,11 +51,12 @@ Rules live in probe.mjs. Session consequences:
   not longer than `acceptanceRatio` of the source block; the answer must
   contain `<digest>…</digest>`, text outside the tags is ignored, tool-call
   markup inside the tags is rejected;
-- a rejection caused by the block (tool call, missing or empty
-  wrapper, tool markup, grown answer) is recorded and never retried; a
-  truncated answer — cut off by our own output budget — a network error or a
-  cancellation leaves the block in the queue with a doubled budget, but not
-  more than three attempts per session.
+- a rejection caused by the block (tool call, missing or empty wrapper, tool
+  markup, grown answer) is recorded and never retried; a network error or a
+  cancellation leaves the block in the queue, but not more than three attempts
+  per session. The extension sets no output budget of its own — every call asks
+  for the model's own output ceiling; an answer cut off at that ceiling is
+  rejected naming the ceiling.
 
 Reports are checked on other terms: a final answer longer than
 `minReportTokens` qualifies, a message with tool calls does not. Only a report

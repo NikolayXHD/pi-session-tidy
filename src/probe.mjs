@@ -225,7 +225,7 @@ expectEqual(
 
 const lengthVerdict = validateCompaction(attemptResult("length", [textBlock(longReasoning)]), 100, 0.95, estimateText);
 expectEqual("a length cut-off is not accepted", lengthVerdict.ok, false);
-expectEqual("a length cut-off retries with a bigger budget", lengthVerdict.terminal, false);
+expectEqual("a length cut-off is the model's own ceiling and is terminal", lengthVerdict.terminal, true);
 expectEqual(
 	"toolUse is a terminal rejection",
 	validateCompaction(attemptResult("toolUse", [textBlock(longReasoning)]), 100, 0.95, estimateText).terminal,
@@ -404,14 +404,14 @@ expectEqual("an empty rewrite is rejected", validateRewrite(attemptResult("stop"
 expectEqual("tool markup in the rewrite is rejected", validateRewrite(attemptResult("stop", [textBlock("<rewrite><tool_calls></rewrite>")]), rawReply, estimateText).ok, false);
 expectEqual("an aborted rewrite is not terminal", validateRewrite(attemptResult("aborted", []), rawReply, estimateText).terminal, false);
 expectEqual(
-	"a truncated digest retries with a bigger budget instead of rejection",
-	validateCompaction(attemptResult("length", [textBlock("<digest>x</digest>")]), 100, 0.95, estimateText).terminal,
-	false,
+	"a truncated digest names the model's own ceiling",
+	validateCompaction(attemptResult("length", [textBlock("<digest>x</digest>")]), 100, 0.95, estimateText),
+	{ ok: false, reason: "stop reason: length — the model hit its own output ceiling", terminal: true },
 );
 expectEqual(
-	"a truncated rewrite retries with a bigger budget instead of rejection",
-	validateRewrite(attemptResult("length", [textBlock("<rewrite>x</rewrite>")]), rawReply, estimateText).terminal,
-	false,
+	"a truncated rewrite names the model's own ceiling",
+	validateRewrite(attemptResult("length", [textBlock("<rewrite>x</rewrite>")]), rawReply, estimateText),
+	{ ok: false, reason: "stop reason: length — the model hit its own output ceiling", terminal: true },
 );
 
 expectEqual("a foreign text edit is detected", foreignChangedText([textBlock("raw")], [textBlock("changed")]), true);
