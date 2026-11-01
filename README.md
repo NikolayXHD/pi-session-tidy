@@ -143,11 +143,16 @@ itself: pi subagents do not see them.
 ```markdown
 ---
 model: deepseek/deepseek-flash
-thinking: high
+thinking: max
 ---
 
 Rewrite the thinking block quoted below in the same language, shorter …
 ```
+
+The thinking level is named on pi's scale and clamped to the model's own:
+`max` means the top this model has — DeepSeek gets its `max`, a model topping
+at `high` gets `high`. A blind `high` would knowingly cap the models that go
+deeper.
 
 There is no built-in task text: a prompt is authored by the human. No prompt
 — the subtask does not run, and the menu says so on the container row.
