@@ -762,7 +762,7 @@ class SessionTidy {
 		const message = await this.editorCall(
 			container,
 			buildRequestText(container.task, quoteTag, item.text),
-			Math.max(512, item.tokens * 2),
+			this.attemptBudget(Math.max(2048, item.tokens * 4), item.entryId),
 		);
 		if (!message) return;
 		const spentTokens = message.usage?.totalTokens ?? 0;
@@ -803,6 +803,14 @@ class SessionTidy {
 		this.rebuildSubstitutions();
 	}
 
+	/**
+	 * The output budget doubles per attempt: an answer cut off by our own budget
+	 * is our fault, never a reason to reject the text.
+	 */
+	private attemptBudget(base: number, key: string): number {
+		return base * 2 ** (this.attempts.get(key) ?? 0);
+	}
+
 	/** A digest stands in the place of the raw block: shorter, nothing lost. */
 	private async compact(candidate: Candidate): Promise<void> {
 		const container = this.digestsContainer;
@@ -810,7 +818,7 @@ class SessionTidy {
 		const message = await this.editorCall(
 			container,
 			buildRequestText(container.task, "thinking_block", candidate.text),
-			Math.max(512, candidate.tokens),
+			this.attemptBudget(Math.max(512, candidate.tokens * 1.5), blockKey(candidate.entryId, candidate.blockIndex)),
 		);
 		if (!message) return;
 		const spentTokens = message.usage?.totalTokens ?? 0;

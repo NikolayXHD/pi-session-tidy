@@ -454,19 +454,28 @@ function answerText(content: readonly ContentBlock[]): string {
 		.join("\n");
 }
 
+/**
+ * A stopped answer fails, but not every failure is the text's fault: an answer
+ * cut off by our own output budget retries with a bigger one instead of being
+ * rejected — length is no criterion.
+ */
+function stopFailure(result: AttemptResult): Verdict | undefined {
+	if (result.stopReason === "stop") return undefined;
+	return {
+		ok: false,
+		reason: `stop reason: ${result.stopReason}`,
+		terminal: result.stopReason !== "error" && result.stopReason !== "aborted" && result.stopReason !== "length",
+	};
+}
+
 export function validateCompaction(
 	result: AttemptResult,
 	rawTokens: number,
 	acceptanceRatio: number,
 	estimate: (text: string) => number,
 ): Verdict {
-	if (result.stopReason !== "stop") {
-		return {
-			reason: `stop reason: ${result.stopReason}`,
-			terminal: result.stopReason !== "error" && result.stopReason !== "aborted",
-			ok: false,
-		};
-	}
+	const stopped = stopFailure(result);
+	if (stopped) return stopped;
 	if (result.content.some((block) => block.type === "toolCall")) {
 		return { ok: false, reason: "the answer contains a tool call", terminal: true };
 	}
@@ -508,13 +517,8 @@ export function validateRewrite(
 	rawText: string,
 	estimate: (text: string) => number,
 ): RewriteVerdict {
-	if (result.stopReason !== "stop") {
-		return {
-			reason: `stop reason: ${result.stopReason}`,
-			terminal: result.stopReason !== "error" && result.stopReason !== "aborted",
-			ok: false,
-		};
-	}
+	const stopped = stopFailure(result);
+	if (stopped) return stopped;
 	if (result.content.some((block) => block.type === "toolCall")) {
 		return { ok: false, reason: "the answer contains a tool call", terminal: true };
 	}
